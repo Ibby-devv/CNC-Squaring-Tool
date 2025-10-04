@@ -1,0 +1,364 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CNC Stock Squaring G-code Generator</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+</head>
+<body>
+    <div id="root"></div>
+    
+    <script type="text/babel">
+        const { useState, useEffect, useRef } = React;
+        
+        const Settings = () => <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="3"></circle><path d="M12 1v6m0 6v6"></path></svg>;
+        const Download = () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>;
+        const Play = () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>;
+        const Pause = () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="6" y="4" width="4" height="16"></rect><rect x="14" y="4" width="4" height="16"></rect></svg>;
+        const RotateCcw = () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="1 4 1 10 7 10"></polyline><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"></path></svg>;
+        const ChevronLeft = () => <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="15 18 9 12 15 6"></polyline></svg>;
+        const ChevronRight = () => <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="9 18 15 12 9 6"></polyline></svg>;
+        const AlertCircle = () => <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>;
+
+        function App() {
+          const [finalSquareSize, setFinalSquareSize] = useState(0);
+          const [initialX, setInitialX] = useState(0);
+          const [initialY, setInitialY] = useState(0);
+          const [stockDepth, setStockDepth] = useState(0);
+          const [toolDiameter, setToolDiameter] = useState(3.175);
+          const [percentageRemoval, setPercentageRemoval] = useState(5);
+          const [feedRate, setFeedRate] = useState(800);
+          const [spindleSpeed, setSpindleSpeed] = useState(24000);
+          const [spindleDelay, setSpindleDelay] = useState(5);
+          const [depthPerPass, setDepthPerPass] = useState(0.2);
+          const [safeZ, setSafeZ] = useState(5);
+          const [fullDepthCut, setFullDepthCut] = useState(true);
+          const [zOffset, setZOffset] = useState(0);
+          const [gcode, setGcode] = useState('');
+          const [warnings, setWarnings] = useState([]);
+          const [toolPath, setToolPath] = useState([]);
+          const [isAnimating, setIsAnimating] = useState(false);
+          const [currentStep, setCurrentStep] = useState(0);
+          const [animationSpeed, setAnimationSpeed] = useState(50);
+          const canvasRef = useRef(null);
+          const animationRef = useRef(null);
+
+          const generateGcode = () => {
+            const warns = [];
+            const finalSize = parseFloat(finalSquareSize);
+            const origX = parseFloat(initialX);
+            const origY = parseFloat(initialY);
+            const x0 = 0;
+            const y0 = 0;
+            const depth = parseFloat(stockDepth);
+            const zDepthOffset = parseFloat(zOffset);
+            const totalDepth = depth + zDepthOffset;
+            const cutDepth = fullDepthCut ? totalDepth : parseFloat(depthPerPass);
+            const toolDiam = parseFloat(toolDiameter);
+            const toolRadius = toolDiam / 2;
+            const removalAmount = toolDiam * (parseFloat(percentageRemoval) / 100);
+            
+            if (origX < finalSize) warns.push(`Initial X dimension (${origX}mm) is smaller than final square size (${finalSize}mm)`);
+            if (origY < finalSize) warns.push(`Initial Y dimension (${origY}mm) is smaller than final square size (${finalSize}mm)`);
+            
+            const xRemovalPerSide = (origX - finalSize) / 2;
+            const yRemovalPerSide = (origY - finalSize) / 2;
+            const numPassesX = Math.ceil(xRemovalPerSide / removalAmount);
+            const numPassesY = Math.ceil(yRemovalPerSide / removalAmount);
+            const numLateralPasses = Math.max(numPassesX, numPassesY);
+            const numVerticalPasses = Math.ceil(totalDepth / cutDepth);
+            const totalPasses = numLateralPasses * numVerticalPasses;
+            
+            if (numLateralPasses < 1) warns.push(`No material needs to be removed - final size matches initial size`);
+            setWarnings(warns);
+            
+            const finalX0 = x0 + xRemovalPerSide;
+            const finalY0 = y0 + yRemovalPerSide;
+            const finalX1 = finalX0 + finalSize;
+            const finalY1 = finalY0 + finalSize;
+            
+            const path = [];
+            let code = '; G-code for squaring stock\n';
+            code += '; Generated by CNC Stock Squaring Tool\n';
+            code += `; Initial Stock: ${origX}mm x ${origY}mm x ${depth}mm\n`;
+            code += `; Initial Stock Position: X0=0mm, Y0=0mm (bottom-left corner)\n`;
+            code += `; Final Square Size: ${finalSize}mm x ${finalSize}mm\n`;
+            code += `; Final Square Position: X=${finalX0.toFixed(3)} to ${finalX1.toFixed(3)}, Y=${finalY0.toFixed(3)} to ${finalY1.toFixed(3)}\n`;
+            code += `; Material to remove: X=${xRemovalPerSide.toFixed(3)}mm per side, Y=${yRemovalPerSide.toFixed(3)}mm per side\n`;
+            code += `; Tool Diameter: ${toolDiam}mm\n`;
+            code += `; Removal: ${percentageRemoval}% of tool diameter (${removalAmount.toFixed(3)}mm per lateral pass)\n`;
+            code += `; Lateral passes: ${numLateralPasses}\n`;
+            code += `; Stock depth: ${depth}mm, Z offset: ${zDepthOffset}mm, Total depth: ${totalDepth}mm\n`;
+            code += `; Depth per pass: ${cutDepth}mm\n`;
+            code += `; Vertical passes per lateral: ${numVerticalPasses}\n`;
+            code += `; Total passes: ${totalPasses}\n\n`;
+            code += 'G21 ; Set units to mm\nG90 ; Absolute positioning\n';
+            code += `M3 S${spindleSpeed} ; Start spindle\n`;
+            code += `G4 P${spindleDelay} ; Dwell ${spindleDelay} seconds for spindle to reach speed\n\n`;
+            
+            for (let lateralPass = 0; lateralPass < numLateralPasses; lateralPass++) {
+              const passesFromEnd = numLateralPasses - lateralPass - 1;
+              const baseOffset = passesFromEnd * removalAmount;
+              
+              // Calculate X and Y offsets independently
+              const xPassesFromEnd = Math.min(passesFromEnd, numPassesX - 1);
+              const yPassesFromEnd = Math.min(passesFromEnd, numPassesY - 1);
+              const xOffset = toolRadius + xPassesFromEnd * removalAmount;
+              const yOffset = toolRadius + yPassesFromEnd * removalAmount;
+              
+              const x1 = finalX0 - xOffset, y1 = finalY0 - yOffset;
+              const x2 = finalX1 + xOffset, y2 = finalY0 - yOffset;
+              const x3 = finalX1 + xOffset, y3 = finalY1 + yOffset;
+              const x4 = finalX0 - xOffset, y4 = finalY1 + yOffset;
+              
+              code += `\n; === Lateral Pass ${lateralPass + 1}/${numLateralPasses} ===\n`;
+              code += `; Tool offset from final square edge: X=${xOffset.toFixed(3)}mm, Y=${yOffset.toFixed(3)}mm\n\n`;
+              code += `G0 Z${safeZ} ; Move to safe height\n`;
+              code += `G0 X${x1.toFixed(3)} Y${y1.toFixed(3)} ; Move to start position\n\n`;
+              path.push({ type: 'lateralPass', num: lateralPass + 1, offset: Math.max(xOffset, yOffset) });
+              
+              let currentDepth = 0, verticalPass = 1;
+              while (currentDepth < totalDepth) {
+                currentDepth += cutDepth;
+                if (currentDepth > totalDepth) currentDepth = totalDepth;
+                code += `; Vertical Pass ${verticalPass} - Depth: ${currentDepth.toFixed(2)}mm\n`;
+                code += `G1 Z${-currentDepth.toFixed(3)} F${feedRate / 2} ; Plunge to depth\n`;
+                path.push({ type: 'pass', lateralPass: lateralPass + 1, verticalPass: verticalPass, depth: currentDepth, offset: Math.max(xOffset, yOffset) });
+                path.push({ type: 'plunge', x: x1, y: y1, z: -currentDepth });
+                code += `G1 X${x2.toFixed(3)} Y${y2.toFixed(3)} F${feedRate} ; Cut to bottom-right\n`;
+                path.push({ type: 'cut', x: x2, y: y2, z: -currentDepth });
+                code += `G1 X${x3.toFixed(3)} Y${y3.toFixed(3)} F${feedRate} ; Cut to top-right\n`;
+                path.push({ type: 'cut', x: x3, y: y3, z: -currentDepth });
+                code += `G1 X${x4.toFixed(3)} Y${y4.toFixed(3)} F${feedRate} ; Cut to top-left\n`;
+                path.push({ type: 'cut', x: x4, y: y4, z: -currentDepth });
+                code += `G1 X${x1.toFixed(3)} Y${y1.toFixed(3)} F${feedRate} ; Cut to bottom-left\n`;
+                path.push({ type: 'cut', x: x1, y: y1, z: -currentDepth });
+                code += `G0 Z${safeZ} ; Retract to safe height\n\n`;
+                path.push({ type: 'retract', x: x1, y: y1, z: safeZ });
+                verticalPass++;
+              }
+            }
+            code += '; Finishing\nM5 ; Stop spindle\n';
+            code += `G0 Z${safeZ} ; Move to safe height\nG0 X0 Y0 ; Return to origin\nM30 ; Program end\n`;
+            setToolPath(path);
+            setGcode(code);
+            setCurrentStep(0);
+            setIsAnimating(false);
+          };
+
+          useEffect(() => {
+            if (!canvasRef.current || toolPath.length === 0) return;
+            const canvas = canvasRef.current, ctx = canvas.getContext('2d');
+            const width = canvas.width, height = canvas.height;
+            ctx.fillStyle = '#0f172a';
+            ctx.fillRect(0, 0, width, height);
+            
+            const origX = parseFloat(initialX), origY = parseFloat(initialY);
+            const x0 = 0, y0 = 0;
+            const finalSize = parseFloat(finalSquareSize), toolRadius = parseFloat(toolDiameter) / 2;
+            const maxDim = Math.max(origX, origY) * 1.2, scale = Math.min(width, height) / maxDim;
+            const offsetX = (width - origX * scale) / 2 - x0 * scale;
+            const offsetY = height - (height - origY * scale) / 2 + y0 * scale;
+            const toCanvasX = (x) => x * scale + offsetX, toCanvasY = (y) => offsetY - y * scale;
+            
+            ctx.strokeStyle = '#64748b';
+            ctx.lineWidth = 2;
+            ctx.strokeRect(toCanvasX(x0), toCanvasY(y0 + origY), origX * scale, origY * scale);
+            
+            const xRemovalPerSide = (origX - finalSize) / 2, yRemovalPerSide = (origY - finalSize) / 2;
+            const finalX0 = x0 + xRemovalPerSide, finalY0 = y0 + yRemovalPerSide;
+            ctx.strokeStyle = '#3b82f6';
+            ctx.setLineDash([5, 5]);
+            ctx.strokeRect(toCanvasX(finalX0), toCanvasY(finalY0 + finalSize), finalSize * scale, finalSize * scale);
+            ctx.setLineDash([]);
+            
+            if (currentStep > 0) {
+              let lastX = null, lastY = null, currentOffset = null;
+              for (let i = 0; i <= currentStep && i < toolPath.length; i++) {
+                const step = toolPath[i];
+                if (step.type === 'lateralPass' || step.type === 'pass') currentOffset = step.offset || 0;
+                if (step.type === 'cut' && lastX !== null) {
+                  const offsetRatio = currentOffset / (Math.max(xRemovalPerSide, yRemovalPerSide) + toolRadius);
+                  const hue = 0, lightness = 50 + offsetRatio * 20;
+                  ctx.beginPath();
+                  ctx.arc(toCanvasX(lastX), toCanvasY(lastY), toolRadius * scale, 0, Math.PI * 2);
+                  ctx.fillStyle = `hsla(${hue}, 90%, ${lightness}%, 0.35)`;
+                  ctx.fill();
+                  ctx.strokeStyle = `hsla(${hue}, 90%, ${lightness}%, 0.6)`;
+                  ctx.lineWidth = 1;
+                  ctx.stroke();
+                  ctx.beginPath();
+                  ctx.moveTo(toCanvasX(lastX), toCanvasY(lastY));
+                  ctx.lineTo(toCanvasX(step.x), toCanvasY(step.y));
+                  ctx.strokeStyle = `hsl(${hue}, 90%, ${lightness}%)`;
+                  ctx.lineWidth = 2;
+                  ctx.stroke();
+                  ctx.beginPath();
+                  ctx.arc(toCanvasX(lastX), toCanvasY(lastY), 2, 0, Math.PI * 2);
+                  ctx.fillStyle = '#ffffff';
+                  ctx.fill();
+                }
+                if (step.x !== undefined && step.y !== undefined) { lastX = step.x; lastY = step.y; }
+              }
+              if (lastX !== null) {
+                ctx.beginPath();
+                ctx.arc(toCanvasX(lastX), toCanvasY(lastY), toolRadius * scale, 0, Math.PI * 2);
+                ctx.strokeStyle = '#22c55e';
+                ctx.lineWidth = 3;
+                ctx.stroke();
+                ctx.fillStyle = 'rgba(34, 197, 94, 0.3)';
+                ctx.fill();
+                ctx.beginPath();
+                ctx.arc(toCanvasX(lastX), toCanvasY(lastY), 4, 0, Math.PI * 2);
+                ctx.fillStyle = '#22c55e';
+                ctx.fill();
+                ctx.strokeStyle = '#ffffff';
+                ctx.lineWidth = 2;
+                ctx.stroke();
+              }
+            }
+            ctx.fillStyle = '#94a3b8';
+            ctx.font = '14px sans-serif';
+            ctx.fillText('Initial Stock', toCanvasX(x0) + 5, toCanvasY(y0 + origY) + 18);
+            ctx.fillStyle = '#3b82f6';
+            ctx.fillText('Final Square', toCanvasX(finalX0) + 5, toCanvasY(finalY0 + finalSize) + 18);
+         }, [toolPath, currentStep, initialX, initialY, finalSquareSize, toolDiameter]);
+
+          useEffect(() => {
+            if (isAnimating && currentStep < toolPath.length - 1) {
+              animationRef.current = setTimeout(() => setCurrentStep(s => s + 1), animationSpeed);
+            } else if (currentStep >= toolPath.length - 1) setIsAnimating(false);
+            return () => { if (animationRef.current) clearTimeout(animationRef.current); };
+          }, [isAnimating, currentStep, toolPath.length, animationSpeed]);
+
+          const downloadGcode = () => {
+            const blob = new Blob([gcode], { type: 'text/plain' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'squaring_operation.nc';
+            a.click();
+            URL.revokeObjectURL(url);
+          };
+
+          return (
+            <div className="min-h-screen bg-gradient-to-br from-slate-900 to-slate-800 p-6">
+              <div className="max-w-6xl mx-auto bg-slate-800 rounded-lg shadow-2xl overflow-hidden border border-slate-700">
+                <div className="bg-gradient-to-r from-blue-600 to-blue-700 p-6">
+                  <h1 className="text-3xl font-bold text-white flex items-center gap-3">
+                    <Settings />
+                    CNC Stock Squaring G-code Generator
+                  </h1>
+                  <p className="text-blue-100 mt-2">Square off irregular stock by machining around the perimeter</p>
+                </div>
+                <div className="grid md:grid-cols-2 gap-6 p-6">
+                  <div className="space-y-4">
+                    <div className="bg-slate-700 p-4 rounded-lg">
+                      <h2 className="text-xl font-semibold text-white mb-4">Stock Dimensions</h2>
+                      <div className="space-y-3">
+                        <div><label className="block text-sm font-medium text-slate-300 mb-1">Final Square Size (mm)</label><input type="number" value={finalSquareSize} onChange={(e) => setFinalSquareSize(e.target.value)} className="w-full px-3 py-2 bg-slate-600 border border-slate-500 rounded text-white focus:ring-2 focus:ring-blue-500 focus:outline-none" /></div>
+                        <div><label className="block text-sm font-medium text-slate-300 mb-1">Initial X Dimension (mm)</label><input type="number" value={initialX} onChange={(e) => setInitialX(e.target.value)} className="w-full px-3 py-2 bg-slate-600 border border-slate-500 rounded text-white focus:ring-2 focus:ring-blue-500 focus:outline-none" /></div>
+                        <div><label className="block text-sm font-medium text-slate-300 mb-1">Initial Y Dimension (mm)</label><input type="number" value={initialY} onChange={(e) => setInitialY(e.target.value)} className="w-full px-3 py-2 bg-slate-600 border border-slate-500 rounded text-white focus:ring-2 focus:ring-blue-500 focus:outline-none" /></div>
+                        <div><label className="block text-sm font-medium text-slate-300 mb-1">Stock Depth/Thickness (mm)</label><input type="number" value={stockDepth} onChange={(e) => setStockDepth(e.target.value)} step="0.1" className="w-full px-3 py-2 bg-slate-600 border border-slate-500 rounded text-white focus:ring-2 focus:ring-blue-500 focus:outline-none" /></div>
+                        <div className="bg-slate-600 p-3 rounded"><p className="text-xs text-slate-300"><strong>Material to remove per side:</strong><br/>X: {((parseFloat(initialX) - parseFloat(finalSquareSize)) / 2).toFixed(3)} mm<br/>Y: {((parseFloat(initialY) - parseFloat(finalSquareSize)) / 2).toFixed(3)} mm</p></div>
+                      </div>
+                    </div>
+                    <div className="bg-slate-700 p-4 rounded-lg">
+                      <h2 className="text-xl font-semibold text-white mb-4">Tool Settings</h2>
+                      <div className="space-y-3">
+                        <div><label className="block text-sm font-medium text-slate-300 mb-1">Tool Diameter (mm)</label><input type="number" value={toolDiameter} onChange={(e) => setToolDiameter(e.target.value)} className="w-full px-3 py-2 bg-slate-600 border border-slate-500 rounded text-white focus:ring-2 focus:ring-blue-500 focus:outline-none" /></div>
+                        <div><label className="block text-sm font-medium text-slate-300 mb-1">Removal Percentage (% of tool diameter)</label><input type="number" value={percentageRemoval} onChange={(e) => setPercentageRemoval(e.target.value)} min="1" max="100" className="w-full px-3 py-2 bg-slate-600 border border-slate-500 rounded text-white focus:ring-2 focus:ring-blue-500 focus:outline-none" /><p className="text-xs text-slate-400 mt-1">Actual removal per pass: {(parseFloat(toolDiameter) * (parseFloat(percentageRemoval) / 100)).toFixed(3)} mm</p></div>
+                      </div>
+                    </div>
+                    <div className="bg-slate-700 p-4 rounded-lg">
+                      <h2 className="text-xl font-semibold text-white mb-4">Cutting Parameters</h2>
+                      <div className="space-y-3">
+                        <div><label className="block text-sm font-medium text-slate-300 mb-1">Feed Rate (mm/min)</label><input type="number" value={feedRate} onChange={(e) => setFeedRate(e.target.value)} className="w-full px-3 py-2 bg-slate-600 border border-slate-500 rounded text-white focus:ring-2 focus:ring-blue-500 focus:outline-none" /></div>
+                        <div><label className="block text-sm font-medium text-slate-300 mb-1">Spindle Speed (RPM)</label><input type="number" value={spindleSpeed} onChange={(e) => setSpindleSpeed(e.target.value)} className="w-full px-3 py-2 bg-slate-600 border border-slate-500 rounded text-white focus:ring-2 focus:ring-blue-500 focus:outline-none" /></div>
+                        <div><label className="block text-sm font-medium text-slate-300 mb-1">Spindle Startup Delay (seconds)</label><input type="number" value={spindleDelay} onChange={(e) => setSpindleDelay(e.target.value)} step="0.5" min="0" className="w-full px-3 py-2 bg-slate-600 border border-slate-500 rounded text-white focus:ring-2 focus:ring-blue-500 focus:outline-none" /><p className="text-xs text-slate-400 mt-1">Time to wait for spindle to reach full speed</p></div>
+                        <div><label className="block text-sm font-medium text-slate-300 mb-1">Vertical Depth per Pass (mm)</label><input type="number" value={depthPerPass} onChange={(e) => setDepthPerPass(e.target.value)} step="0.1" disabled={fullDepthCut} className="w-full px-3 py-2 bg-slate-600 border border-slate-500 rounded text-white focus:ring-2 focus:ring-blue-500 focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed" /><div className="flex items-center gap-2 mt-2"><input type="checkbox" id="fullDepthCut" checked={fullDepthCut} onChange={(e) => setFullDepthCut(e.target.checked)} className="w-4 h-4 text-blue-600 bg-slate-600 border-slate-500 rounded focus:ring-blue-500" /><label htmlFor="fullDepthCut" className="text-sm text-slate-300 cursor-pointer">Full depth cut (one vertical pass per lateral pass)</label></div><p className="text-xs text-slate-400 mt-1">Number of passes: {fullDepthCut ? 1 : Math.ceil((parseFloat(stockDepth) + parseFloat(zOffset)) / parseFloat(depthPerPass))}</p></div>
+                        <div><label className="block text-sm font-medium text-slate-300 mb-1">Safe Z Height (mm)</label><input type="number" value={safeZ} onChange={(e) => setSafeZ(e.target.value)} className="w-full px-3 py-2 bg-slate-600 border border-slate-500 rounded text-white focus:ring-2 focus:ring-blue-500 focus:outline-none" /></div>
+                        <div><label className="block text-sm font-medium text-slate-300 mb-1">Z Depth Offset (mm)</label><input type="number" value={zOffset} onChange={(e) => setZOffset(e.target.value)} step="0.1" min="0" className="w-full px-3 py-2 bg-slate-600 border border-slate-500 rounded text-white focus:ring-2 focus:ring-blue-500 focus:outline-none" /><p className="text-xs text-slate-400 mt-1">Optional extra depth beyond stock (e.g., 0.5mm to ensure clean cut)</p><p className="text-xs text-slate-300 mt-1">Total cutting depth: {(parseFloat(stockDepth) + parseFloat(zOffset)).toFixed(2)} mm</p></div>
+                      </div>
+                    </div>
+                    {warnings.length > 0 && (
+                      <div className="bg-yellow-900 border border-yellow-600 p-4 rounded-lg">
+                        <div className="flex items-start gap-2"><AlertCircle /><div><h3 className="text-yellow-200 font-semibold mb-1">Warnings:</h3><ul className="text-sm text-yellow-100 space-y-1">{warnings.map((warn, idx) => <li key={idx}>• {warn}</li>)}</ul></div></div>
+                      </div>
+                    )}
+                    <button onClick={generateGcode} className="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 px-6 rounded-lg transition duration-200 shadow-lg">Generate G-code</button>
+                  </div>
+                  <div className="space-y-4">
+                    {gcode && (
+                      <div className="bg-slate-700 p-4 rounded-lg">
+                        <h2 className="text-xl font-semibold text-white mb-4">Operation Statistics</h2>
+                        <div className="grid grid-cols-2 gap-3">
+                          <div className="bg-slate-800 p-3 rounded"><p className="text-xs text-slate-400">Lateral Passes</p><p className="text-2xl font-bold text-blue-400">{Math.max(Math.ceil(((parseFloat(initialX) - parseFloat(finalSquareSize)) / 2) / (parseFloat(toolDiameter) * (parseFloat(percentageRemoval) / 100))), Math.ceil(((parseFloat(initialY) - parseFloat(finalSquareSize)) / 2) / (parseFloat(toolDiameter) * (parseFloat(percentageRemoval) / 100))))}</p></div>
+                          <div className="bg-slate-800 p-3 rounded"><p className="text-xs text-slate-400">Vertical Passes (per lateral)</p><p className="text-2xl font-bold text-green-400">{fullDepthCut ? 1 : Math.ceil((parseFloat(stockDepth) + parseFloat(zOffset)) / parseFloat(depthPerPass))}</p></div>
+                          <div className="bg-slate-800 p-3 rounded col-span-2"><p className="text-xs text-slate-400">Total Passes</p><p className="text-3xl font-bold text-purple-400">{Math.max(Math.ceil(((parseFloat(initialX) - parseFloat(finalSquareSize)) / 2) / (parseFloat(toolDiameter) * (parseFloat(percentageRemoval) / 100))), Math.ceil(((parseFloat(initialY) - parseFloat(finalSquareSize)) / 2) / (parseFloat(toolDiameter) * (parseFloat(percentageRemoval) / 100)))) * (fullDepthCut ? 1 : Math.ceil((parseFloat(stockDepth) + parseFloat(zOffset)) / parseFloat(depthPerPass)))}</p></div>
+                          <div className="bg-slate-800 p-3 rounded"><p className="text-xs text-slate-400">Material Removed (X)</p><p className="text-lg font-bold text-slate-300">{((parseFloat(initialX) - parseFloat(finalSquareSize))).toFixed(3)} mm</p></div>
+                          <div className="bg-slate-800 p-3 rounded"><p className="text-xs text-slate-400">Material Removed (Y)</p><p className="text-lg font-bold text-slate-300">{((parseFloat(initialY) - parseFloat(finalSquareSize))).toFixed(3)} mm</p></div>
+                        </div>
+                      </div>
+                    )}
+                    <div className="bg-slate-700 p-4 rounded-lg">
+                      <h2 className="text-xl font-semibold text-white mb-4">Tool Path Animation</h2>
+                      <div className="bg-slate-900 rounded-lg p-4 mb-4">
+                        <canvas ref={canvasRef} width={500} height={500} className="w-full h-auto border border-slate-600 rounded" />
+                      </div>
+                      {toolPath.length > 0 && (
+                        <div className="space-y-3">
+                          <div className="flex gap-2">
+                            <button onClick={() => { if (currentStep > 0) { setCurrentStep(s => s - 1); setIsAnimating(false); }}} disabled={currentStep === 0} className="flex items-center justify-center bg-slate-600 hover:bg-slate-500 disabled:bg-slate-700 disabled:cursor-not-allowed text-white px-3 py-2 rounded transition duration-200"><ChevronLeft /></button>
+                            <button onClick={() => setIsAnimating(!isAnimating)} className="flex-1 flex items-center justify-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded transition duration-200">{isAnimating ? <><Pause />Pause</> : <><Play />Play</>}</button>
+                            <button onClick={() => { if (currentStep < toolPath.length - 1) { setCurrentStep(s => s + 1); setIsAnimating(false); }}} disabled={currentStep >= toolPath.length - 1} className="flex items-center justify-center bg-slate-600 hover:bg-slate-500 disabled:bg-slate-700 disabled:cursor-not-allowed text-white px-3 py-2 rounded transition duration-200"><ChevronRight /></button>
+                            <button onClick={() => { setCurrentStep(0); setIsAnimating(false); }} className="flex items-center justify-center gap-2 bg-slate-600 hover:bg-slate-500 text-white px-4 py-2 rounded transition duration-200"><RotateCcw /></button>
+                          </div>
+                          <div>
+                            <label className="block text-sm font-medium text-slate-300 mb-2">Animation Speed</label>
+                            <div className="flex items-center gap-3">
+                              <span className="text-xs text-slate-400">Fast</span>
+                              <input type="range" min="10" max="500" step="10" value={animationSpeed} onChange={(e) => setAnimationSpeed(parseInt(e.target.value))} className="flex-1" />
+                              <span className="text-xs text-slate-400">Slow</span>
+                            </div>
+                            <p className="text-xs text-slate-400 text-center mt-1">{animationSpeed}ms per step</p>
+                          </div>
+                          <div className="bg-slate-800 p-3 rounded">
+                            <p className="text-sm text-slate-300">Step: {currentStep} / {toolPath.length - 1}</p>
+                            {toolPath[currentStep] && toolPath[currentStep].type === 'lateralPass' && (<p className="text-sm text-purple-400 font-semibold">Lateral Pass {toolPath[currentStep].num} - Offset: {toolPath[currentStep].offset.toFixed(2)}mm</p>)}
+                            {toolPath[currentStep] && toolPath[currentStep].type === 'pass' && (<p className="text-sm text-blue-400 font-semibold">Lateral {toolPath[currentStep].lateralPass} / Vertical {toolPath[currentStep].verticalPass} - Depth: {toolPath[currentStep].depth.toFixed(2)}mm</p>)}
+                          </div>
+                          <div className="text-xs text-slate-400 space-y-1 bg-slate-800 p-3 rounded">
+                            <p className="font-semibold text-slate-300 mb-2">Legend:</p>
+                            <div className="flex items-center gap-2"><div className="w-4 h-4 border-2 border-slate-500 rounded"></div><span>Initial Stock Boundary</span></div>
+                            <div className="flex items-center gap-2"><div className="w-4 h-4 border-2 border-blue-500 rounded" style={{borderStyle: 'dashed'}}></div><span>Final Square Target</span></div>
+                            <div className="flex items-center gap-2"><div className="w-4 h-1 bg-red-500"></div><span>Tool Center Path</span></div>
+                            <div className="flex items-center gap-2"><div className="w-4 h-4 bg-red-500 opacity-40 rounded-full border border-red-400"></div><span>Material Removal Area</span></div>
+                            <div className="flex items-center gap-2"><div className="w-4 h-4 border-2 border-green-500 bg-green-500 bg-opacity-30 rounded-full relative"><div className="absolute inset-0 flex items-center justify-center"><div className="w-1.5 h-1.5 bg-green-500 rounded-full border border-white"></div></div></div><span>Current Tool Position</span></div>
+                            <div className="flex items-center gap-2 mt-2 pt-2 border-t border-slate-600"><div className="w-2 h-2 bg-white rounded-full"></div><span>Tool Center Point</span></div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                    <div className="bg-slate-700 p-4 rounded-lg flex flex-col">
+                      <div className="flex justify-between items-center mb-4">
+                        <h2 className="text-xl font-semibold text-white">Generated G-code</h2>
+                        {gcode && (<button onClick={downloadGcode} className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded transition duration-200"><Download />Download</button>)}
+                      </div>
+                      <textarea value={gcode} readOnly placeholder="G-code will appear here after generation..." className="flex-1 w-full px-3 py-2 bg-slate-900 border border-slate-600 rounded text-green-400 font-mono text-sm focus:outline-none resize-none" rows={15} />
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          );
+        }
+
+        ReactDOM.render(<App />, document.getElementById('root'));
+    </script>
+</body>
+</html>
