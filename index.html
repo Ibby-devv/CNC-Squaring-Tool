@@ -39,6 +39,7 @@
           const [safeZ, setSafeZ] = useState(5);
           const [fullDepthCut, setFullDepthCut] = useState(true);
           const [zOffset, setZOffset] = useState(0);
+          const [firstPassOffset, setFirstPassOffset] = useState(0);
           const [gcode, setGcode] = useState('');
           const [warnings, setWarnings] = useState([]);
           const [toolPath, setToolPath] = useState([]);
@@ -73,7 +74,10 @@
             const numPassesY = Math.ceil(yRemovalPerSide / removalAmount);
             const numLateralPasses = Math.max(numPassesX, numPassesY);
             const numVerticalPasses = Math.ceil(totalDepth / cutDepth);
-            const totalPasses = numLateralPasses * numVerticalPasses;
+            const firstPassOffsetValue = parseFloat(firstPassOffset);
+            const hasFirstPassOffset = firstPassOffsetValue > 0;
+            const lateralPassesWithOffset = hasFirstPassOffset ? numLateralPasses + 1 : numLateralPasses;
+            const totalPasses = lateralPassesWithOffset * numVerticalPasses;
             
             if (numLateralPasses < 1) warns.push(`No material needs to be removed - final size matches initial size`);
             setWarnings(warns);
@@ -93,7 +97,11 @@
             code += `; Material to remove: X=${xRemovalPerSide.toFixed(3)}mm per side, Y=${yRemovalPerSide.toFixed(3)}mm per side\n`;
             code += `; Tool Diameter: ${toolDiam}mm\n`;
             code += `; Removal: ${percentageRemoval}% of tool diameter (${removalAmount.toFixed(3)}mm per lateral pass)\n`;
-            code += `; Lateral passes: ${numLateralPasses}\n`;
+            code += `; Lateral passes: ${numLateralPasses}`;
+            if (hasFirstPassOffset) {
+              code += ` + 1 roughing pass (${firstPassOffsetValue.toFixed(3)}mm offset)`;
+            }
+            code += `\n`;
             code += `; Stock depth: ${depth}mm, Z offset: ${zDepthOffset}mm, Total depth: ${totalDepth}mm\n`;
             code += `; Depth per pass: ${cutDepth}mm\n`;
             code += `; Vertical passes per lateral: ${numVerticalPasses}\n`;
@@ -102,15 +110,33 @@
             code += `M3 S${spindleSpeed} ; Start spindle\n`;
             code += `G4 P${spindleDelay} ; Dwell ${spindleDelay} seconds for spindle to reach speed\n\n`;
             
-            for (let lateralPass = 0; lateralPass < numLateralPasses; lateralPass++) {
-              const passesFromEnd = numLateralPasses - lateralPass - 1;
+            
+            const totalPassesWithOffset = hasFirstPassOffset ? numLateralPasses + 1 : numLateralPasses;
+
+              for (let lateralPass = 0; lateralPass < totalPassesWithOffset; lateralPass++) {            
+              // Adjust for extra first pass if offset is configured
+              let effectivePass = lateralPass;
+              let extraOffset = 0;
+
+              if (hasFirstPassOffset) {
+                if (lateralPass === 0) {
+                  // This is the extra offset pass (Pass 0)
+                  effectivePass = 0; // Act like normal first pass
+                  extraOffset = firstPassOffsetValue; // But add extra offset
+                } else {
+                  // Normal passes, shifted by 1
+                  effectivePass = lateralPass - 1;
+                }
+              }
+
+              const passesFromEnd = numLateralPasses - effectivePass - 1;
               const baseOffset = passesFromEnd * removalAmount;
-              
+
               // Calculate X and Y offsets independently
               const xPassesFromEnd = Math.min(passesFromEnd, numPassesX - 1);
               const yPassesFromEnd = Math.min(passesFromEnd, numPassesY - 1);
-              const xOffset = toolRadius + xPassesFromEnd * removalAmount;
-              const yOffset = toolRadius + yPassesFromEnd * removalAmount;
+              const xOffset = toolRadius + xPassesFromEnd * removalAmount + extraOffset;
+              const yOffset = toolRadius + yPassesFromEnd * removalAmount + extraOffset;
               // Determine which sides need cutting
               const cutXSides = (lateralPass < numPassesX); // Left and right sides
               const cutYSides = (lateralPass < numPassesY); // Top and bottom sides
@@ -120,8 +146,13 @@
               const x3 = finalX1 + xOffset, y3 = finalY1 + yOffset;
               const x4 = finalX0 - xOffset, y4 = finalY1 + yOffset;
               
-              code += `\n; === Lateral Pass ${lateralPass + 1}/${numLateralPasses} ===\n`;
-              code += `; Tool offset from final square edge: X=${xOffset.toFixed(3)}mm, Y=${yOffset.toFixed(3)}mm\n\n`;
+              const displayPassNum = hasFirstPassOffset && lateralPass === 0 ? '0 (Roughing)' : (hasFirstPassOffset ? lateralPass : lateralPass + 1);
+              code += `\n; === Lateral Pass ${displayPassNum}/${hasFirstPassOffset ? numLateralPasses : numLateralPasses} ===\n`;
+              code += `; Tool offset from final edge: X=${xOffset.toFixed(3)}mm, Y=${yOffset.toFixed(3)}mm`;
+              if (hasFirstPassOffset && lateralPass === 0) {
+                code += ` (roughing pass with ${firstPassOffsetValue.toFixed(3)}mm offset)`;
+              }
+              code += `\n\n`;
               code += `G0 Z${safeZ} ; Move to safe height\n`;
               code += `G0 X${x1.toFixed(3)} Y${y1.toFixed(3)} ; Move to start position\n\n`;
               path.push({ type: 'lateralPass', num: lateralPass + 1, offset: Math.max(xOffset, yOffset) });
@@ -340,7 +371,8 @@
                       <div className="space-y-3">
                         <div><label className="block text-sm font-medium text-slate-300 mb-1">Tool Diameter (mm)</label><input type="number" value={toolDiameter} onChange={(e) => setToolDiameter(e.target.value)} className="w-full px-3 py-2 bg-slate-600 border border-slate-500 rounded text-white focus:ring-2 focus:ring-blue-500 focus:outline-none" /></div>
                         <div><label className="block text-sm font-medium text-slate-300 mb-1">Removal Percentage (% of tool diameter)</label><input type="number" value={percentageRemoval} onChange={(e) => setPercentageRemoval(e.target.value)} min="1" max="100" className="w-full px-3 py-2 bg-slate-600 border border-slate-500 rounded text-white focus:ring-2 focus:ring-blue-500 focus:outline-none" /><p className="text-xs text-slate-400 mt-1">Actual removal per pass: {(parseFloat(toolDiameter) * (parseFloat(percentageRemoval) / 100)).toFixed(3)} mm</p></div>
-                      </div>
+                        <div><label className="block text-sm font-medium text-slate-300 mb-1">First Pass Offset (mm)</label><input type="number" value={firstPassOffset} onChange={(e) => setFirstPassOffset(e.target.value)} step="0.5" min="0" className="w-full px-3 py-2 bg-slate-600 border border-slate-500 rounded text-white focus:ring-2 focus:ring-blue-500 focus:outline-none" /><p className="text-xs text-slate-400 mt-1">Adds extra roughing pass beyond stock boundary (0 = disabled)</p></div>
+                        </div>
                     </div>
                     <div className="bg-slate-700 p-4 rounded-lg">
                       <h2 className="text-xl font-semibold text-white mb-4">Cutting Parameters</h2>
@@ -365,7 +397,7 @@
                       <div className="bg-slate-700 p-4 rounded-lg">
                         <h2 className="text-xl font-semibold text-white mb-4">Operation Statistics</h2>
                         <div className="grid grid-cols-2 gap-3">
-                          <div className="bg-slate-800 p-3 rounded"><p className="text-xs text-slate-400">Lateral Passes</p><p className="text-2xl font-bold text-blue-400">{Math.max(Math.ceil(((parseFloat(initialX) - parseFloat(finalX)) / 2) / (parseFloat(toolDiameter) * (parseFloat(percentageRemoval) / 100))), Math.ceil(((parseFloat(initialY) - parseFloat(finalY)) / 2) / (parseFloat(toolDiameter) * (parseFloat(percentageRemoval) / 100))))}</p></div>
+                          <div className="bg-slate-800 p-3 rounded"><p className="text-xs text-slate-400">Lateral Passes</p><p className="text-2xl font-bold text-blue-400">{Math.max(Math.ceil(((parseFloat(initialX) - parseFloat(finalX)) / 2) / (parseFloat(toolDiameter) * (parseFloat(percentageRemoval) / 100))), Math.ceil(((parseFloat(initialY) - parseFloat(finalY)) / 2) / (parseFloat(toolDiameter) * (parseFloat(percentageRemoval) / 100))))}</p>{parseFloat(firstPassOffset) > 0 && (<p className="text-xs text-orange-400 mt-1">+1 roughing pass</p>)}</div>
                           <div className="bg-slate-800 p-3 rounded"><p className="text-xs text-slate-400">Vertical Passes (per lateral)</p><p className="text-2xl font-bold text-green-400">{fullDepthCut ? 1 : Math.ceil((parseFloat(stockDepth) + parseFloat(zOffset)) / parseFloat(depthPerPass))}</p></div>
                           <div className="bg-slate-800 p-3 rounded col-span-2"><p className="text-xs text-slate-400">Total Passes</p><p className="text-3xl font-bold text-purple-400">{Math.max(Math.ceil(((parseFloat(initialX) - parseFloat(finalX)) / 2) / (parseFloat(toolDiameter) * (parseFloat(percentageRemoval) / 100))), Math.ceil(((parseFloat(initialY) - parseFloat(finalY)) / 2) / (parseFloat(toolDiameter) * (parseFloat(percentageRemoval) / 100)))) * (fullDepthCut ? 1 : Math.ceil((parseFloat(stockDepth) + parseFloat(zOffset)) / parseFloat(depthPerPass)))}</p></div>
                           <div className="bg-slate-800 p-3 rounded"><p className="text-xs text-slate-400">Material Removed (X)</p><p className="text-lg font-bold text-slate-300">{((parseFloat(initialX) - parseFloat(finalX))).toFixed(3)} mm</p></div>
