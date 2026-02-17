@@ -25,10 +25,10 @@
         const AlertCircle = () => <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>;
 
         function App() {
-          const [finalX, setFinalX] = useState(100);
-          const [finalY, setFinalY] = useState(100);
-          const [initialX, setInitialX] = useState(0);
-          const [initialY, setInitialY] = useState(0);
+          const [stockX, setStockX] = useState(110);
+          const [stockY, setStockY] = useState(110);
+          const [removePerSideX, setRemovePerSideX] = useState(5);
+          const [removePerSideY, setRemovePerSideY] = useState(5);
           const [stockDepth, setStockDepth] = useState(0);
           const [toolDiameter, setToolDiameter] = useState(3.175);
           const [percentageRemoval, setPercentageRemoval] = useState(5);
@@ -37,8 +37,12 @@
           const [spindleDelay, setSpindleDelay] = useState(5);
           const [depthPerPass, setDepthPerPass] = useState(0.2);
           const [safeZ, setSafeZ] = useState(5);
-          const [fullDepthCut, setFullDepthCut] = useState(true);
+          const [fullDepthCut, setFullDepthCut] = useState(false);
           const [zOffset, setZOffset] = useState(0);
+          const [enableArcLeadInOut, setEnableArcLeadInOut] = useState(true);
+          const [enableFinishingPass, setEnableFinishingPass] = useState(false);
+          const [finishAllowance, setFinishAllowance] = useState(0.2);
+          const [finishFeedRate, setFinishFeedRate] = useState(500);
           const [gcode, setGcode] = useState('');
           const [warnings, setWarnings] = useState([]);
           const [toolPath, setToolPath] = useState([]);
@@ -50,10 +54,12 @@
 
           const generateGcode = () => {
             const warns = [];
-            const finalSizeX = parseFloat(finalX);
-            const finalSizeY = parseFloat(finalY);
-            const origX = parseFloat(initialX);
-            const origY = parseFloat(initialY);
+            const origX = parseFloat(stockX);
+            const origY = parseFloat(stockY);
+            const xRemovalPerSideFinal = parseFloat(removePerSideX);
+            const yRemovalPerSideFinal = parseFloat(removePerSideY);
+            const finalSizeX = origX - 2 * xRemovalPerSideFinal;
+            const finalSizeY = origY - 2 * yRemovalPerSideFinal;
             const x0 = 0;
             const y0 = 0;
             const depth = parseFloat(stockDepth);
@@ -63,14 +69,29 @@
             const toolDiam = parseFloat(toolDiameter);
             const toolRadius = toolDiam / 2;
             const removalAmount = toolDiam * (parseFloat(percentageRemoval) / 100);
+            const useArcLeadInOut = enableArcLeadInOut;
+            const finishAllowanceValue = Math.max(0, parseFloat(finishAllowance) || 0);
+            const finishFeed = Math.max(0, parseFloat(finishFeedRate) || feedRate);
             
-            if (origX < finalSizeX) warns.push(`Initial X dimension (${origX}mm) is smaller than final X size (${finalSizeX}mm)`);
-            if (origY < finalSizeY) warns.push(`Initial Y dimension (${origY}mm) is smaller than final Y size (${finalSizeY}mm)`);
-            
-            const xRemovalPerSide = (origX - finalSizeX) / 2;
-            const yRemovalPerSide = (origY - finalSizeY) / 2;
-            const numPassesX = Math.ceil(xRemovalPerSide / removalAmount);
-            const numPassesY = Math.ceil(yRemovalPerSide / removalAmount);
+            if (xRemovalPerSideFinal < 0) warns.push(`X removal per side (${xRemovalPerSideFinal}mm) cannot be negative`);
+            if (yRemovalPerSideFinal < 0) warns.push(`Y removal per side (${yRemovalPerSideFinal}mm) cannot be negative`);
+            if (finalSizeX <= 0) warns.push(`Final X size (${finalSizeX.toFixed(3)}mm) must be positive`);
+            if (finalSizeY <= 0) warns.push(`Final Y size (${finalSizeY.toFixed(3)}mm) must be positive`);
+            const maxFinishAllowance = Math.min(xRemovalPerSideFinal, yRemovalPerSideFinal);
+            let effectiveFinishAllowance = enableFinishingPass ? finishAllowanceValue : 0;
+            if (enableFinishingPass && effectiveFinishAllowance > maxFinishAllowance) {
+              warns.push(`Finish allowance (${effectiveFinishAllowance}mm) exceeds available stock. Using ${Math.max(0, maxFinishAllowance).toFixed(3)}mm instead.`);
+              effectiveFinishAllowance = Math.max(0, maxFinishAllowance);
+            }
+            if (enableFinishingPass && maxFinishAllowance <= 0) {
+              warns.push('Finishing pass enabled, but there is no extra stock to leave for finishing.');
+            }
+            const roughFinalSizeX = finalSizeX + (enableFinishingPass ? 2 * effectiveFinishAllowance : 0);
+            const roughFinalSizeY = finalSizeY + (enableFinishingPass ? 2 * effectiveFinishAllowance : 0);
+            const xRemovalPerSideRough = (origX - roughFinalSizeX) / 2;
+            const yRemovalPerSideRough = (origY - roughFinalSizeY) / 2;
+            const numPassesX = Math.ceil(xRemovalPerSideRough / removalAmount);
+            const numPassesY = Math.ceil(yRemovalPerSideRough / removalAmount);
             const numLateralPasses = Math.max(numPassesX, numPassesY);
             const numVerticalPasses = Math.ceil(totalDepth / cutDepth);
             const totalPasses = numLateralPasses * numVerticalPasses;
@@ -78,10 +99,15 @@
             if (numLateralPasses < 1) warns.push(`No material needs to be removed - final size matches initial size`);
             setWarnings(warns);
             
-           const finalX0 = x0 + xRemovalPerSide;
-           const finalY0 = y0 + yRemovalPerSide;
+           const finalX0 = x0 + xRemovalPerSideFinal;
+           const finalY0 = y0 + yRemovalPerSideFinal;
            const finalX1 = finalX0 + finalSizeX;
            const finalY1 = finalY0 + finalSizeY;
+
+           const roughFinalX0 = x0 + xRemovalPerSideRough;
+           const roughFinalY0 = y0 + yRemovalPerSideRough;
+           const roughFinalX1 = roughFinalX0 + roughFinalSizeX;
+           const roughFinalY1 = roughFinalY0 + roughFinalSizeY;
             
             const path = [];
             let code = '; G-code for squaring stock\n';
@@ -90,7 +116,7 @@
             code += `; Initial Stock Position: X0=0mm, Y0=0mm (bottom-left corner)\n`;
             code += `; Final Size: ${finalSizeX}mm x ${finalSizeY}mm\n`;
             code += `; Final Square Position: X=${finalX0.toFixed(3)} to ${finalX1.toFixed(3)}, Y=${finalY0.toFixed(3)} to ${finalY1.toFixed(3)}\n`;
-            code += `; Material to remove: X=${xRemovalPerSide.toFixed(3)}mm per side, Y=${yRemovalPerSide.toFixed(3)}mm per side\n`;
+            code += `; Material to remove: X=${xRemovalPerSideFinal.toFixed(3)}mm per side, Y=${yRemovalPerSideFinal.toFixed(3)}mm per side\n`;
             code += `; Tool Diameter: ${toolDiam}mm\n`;
             code += `; Removal: ${percentageRemoval}% of tool diameter (${removalAmount.toFixed(3)}mm per lateral pass)\n`;
             code += `; Lateral passes: ${numLateralPasses}\n`;
@@ -98,6 +124,15 @@
             code += `; Depth per pass: ${cutDepth}mm\n`;
             code += `; Vertical passes per lateral: ${numVerticalPasses}\n`;
             code += `; Total passes: ${totalPasses}\n\n`;
+            if (enableFinishingPass) {
+              code += `; Finishing pass: ON (allowance=${effectiveFinishAllowance.toFixed(3)}mm, feed=${finishFeed}mm/min)\n`;
+            }
+            if (useArcLeadInOut) {
+              code += `; Arc lead-in/out: ENABLED (radius=${toolRadius.toFixed(3)}mm)\n`;
+            } else {
+              code += `; Arc lead-in/out: DISABLED (using vertical plunge)\n`;
+            }
+            code += '\n';
             code += 'G21 ; Set units to mm\nG90 ; Absolute positioning\n';
             code += `M3 S${spindleSpeed} ; Start spindle\n`;
             code += `G4 P${spindleDelay} ; Dwell ${spindleDelay} seconds for spindle to reach speed\n\n`;
@@ -115,15 +150,13 @@
               const cutXSides = (lateralPass < numPassesX); // Left and right sides
               const cutYSides = (lateralPass < numPassesY); // Top and bottom sides
               
-              const x1 = finalX0 - xOffset, y1 = finalY0 - yOffset;
-              const x2 = finalX1 + xOffset, y2 = finalY0 - yOffset;
-              const x3 = finalX1 + xOffset, y3 = finalY1 + yOffset;
-              const x4 = finalX0 - xOffset, y4 = finalY1 + yOffset;
+              const x1 = roughFinalX0 - xOffset, y1 = roughFinalY0 - yOffset;
+              const x2 = roughFinalX1 + xOffset, y2 = roughFinalY0 - yOffset;
+              const x3 = roughFinalX1 + xOffset, y3 = roughFinalY1 + yOffset;
+              const x4 = roughFinalX0 - xOffset, y4 = roughFinalY1 + yOffset;
               
               code += `\n; === Lateral Pass ${lateralPass + 1}/${numLateralPasses} ===\n`;
               code += `; Tool offset from final square edge: X=${xOffset.toFixed(3)}mm, Y=${yOffset.toFixed(3)}mm\n\n`;
-              code += `G0 Z${safeZ} ; Move to safe height\n`;
-              code += `G0 X${x1.toFixed(3)} Y${y1.toFixed(3)} ; Move to start position\n\n`;
               path.push({ type: 'lateralPass', num: lateralPass + 1, offset: Math.max(xOffset, yOffset) });
               
               let currentDepth = 0, verticalPass = 1;
@@ -135,9 +168,24 @@
                   // Determine optimal cutting strategy
                   if (cutXSides && cutYSides) {
                     // Cut all 4 sides (full rectangle)
-                    code += `G1 Z${-currentDepth.toFixed(3)} F${feedRate / 2} ; Plunge to depth\n`;
+                    const arcRadius = toolRadius;
+                    const leadStartX = x1 - arcRadius;
+                    const leadStartY = y1 - arcRadius;
+                    const leadOutX = x1 - arcRadius;
+                    const leadOutY = y1 - arcRadius;
+                    code += `G0 Z${safeZ} ; Move to safe height\n`;
+                    if (useArcLeadInOut) {
+                      code += `G0 X${leadStartX.toFixed(3)} Y${leadStartY.toFixed(3)} Z${safeZ} ; Arc lead-in start\n`;
+                      code += `G3 X${x1.toFixed(3)} Y${y1.toFixed(3)} Z${-currentDepth.toFixed(3)} I${arcRadius.toFixed(3)} J0 F${feedRate / 2} ; Arc lead-in with ramp\n`;
+                      path.push({ type: 'rapid', x: leadStartX, y: leadStartY, z: safeZ });
+                      path.push({ type: 'arc', x: x1, y: y1, z: -currentDepth, cx: x1, cy: leadStartY });
+                    } else {
+                      code += `G0 X${x1.toFixed(3)} Y${y1.toFixed(3)} ; Move to start position\n`;
+                      code += `G1 Z${-currentDepth.toFixed(3)} F${feedRate / 2} ; Plunge to depth\n`;
+                      path.push({ type: 'rapid', x: x1, y: y1, z: safeZ });
+                      path.push({ type: 'plunge', x: x1, y: y1, z: -currentDepth });
+                    }
                     path.push({ type: 'pass', lateralPass: lateralPass + 1, verticalPass: verticalPass, depth: currentDepth, offset: Math.max(xOffset, yOffset) });
-                    path.push({ type: 'plunge', x: x1, y: y1, z: -currentDepth });
                     code += `G1 X${x2.toFixed(3)} Y${y2.toFixed(3)} F${feedRate} ; Cut to bottom-right\n`;
                     path.push({ type: 'cut', x: x2, y: y2, z: -currentDepth });
                     code += `G1 X${x3.toFixed(3)} Y${y3.toFixed(3)} F${feedRate} ; Cut to top-right\n`;
@@ -146,6 +194,10 @@
                     path.push({ type: 'cut', x: x4, y: y4, z: -currentDepth });
                     code += `G1 X${x1.toFixed(3)} Y${y1.toFixed(3)} F${feedRate} ; Cut to bottom-left\n`;
                     path.push({ type: 'cut', x: x1, y: y1, z: -currentDepth });
+                    if (useArcLeadInOut) {
+                      code += `G3 X${leadOutX.toFixed(3)} Y${leadOutY.toFixed(3)} I${(-arcRadius).toFixed(3)} J0 F${feedRate} ; Arc lead-out\n`;
+                      path.push({ type: 'arc', x: leadOutX, y: leadOutY, z: -currentDepth, cx: leadOutX, cy: y1 });
+                    }
                     code += `G0 Z${safeZ} ; Retract to safe height\n\n`;
                     path.push({ type: 'retract', x: x1, y: y1, z: safeZ });
                     
@@ -153,21 +205,53 @@
                     // Cut only left and right sides (Y is at final dimension)
                     code += `; Cutting X sides only (Y at final dimension)\n`;
                     // Left side
-                    code += `G1 Z${-currentDepth.toFixed(3)} F${feedRate / 2} ; Plunge to depth\n`;
+                    const arcRadius = toolRadius;
+                    const leftLeadStartY = y1 - arcRadius;
+                    const leftLeadOutY = y4 + arcRadius;
+                    code += `G0 Z${safeZ} ; Move to safe height\n`;
+                    if (useArcLeadInOut) {
+                      code += `G0 X${x1.toFixed(3)} Y${leftLeadStartY.toFixed(3)} Z${safeZ} ; Arc lead-in start\n`;
+                      code += `G3 X${x1.toFixed(3)} Y${y1.toFixed(3)} Z${-currentDepth.toFixed(3)} I0 J${arcRadius.toFixed(3)} F${feedRate / 2} ; Arc lead-in\n`;
+                      path.push({ type: 'rapid', x: x1, y: leftLeadStartY, z: safeZ });
+                      path.push({ type: 'arc', x: x1, y: y1, z: -currentDepth, cx: x1, cy: y1 });
+                    } else {
+                      code += `G0 X${x1.toFixed(3)} Y${y1.toFixed(3)} ; Move to start position\n`;
+                      code += `G1 Z${-currentDepth.toFixed(3)} F${feedRate / 2} ; Plunge to depth\n`;
+                      path.push({ type: 'rapid', x: x1, y: y1, z: safeZ });
+                      path.push({ type: 'plunge', x: x1, y: y1, z: -currentDepth });
+                    }
                     path.push({ type: 'pass', lateralPass: lateralPass + 1, verticalPass: verticalPass, depth: currentDepth, offset: xOffset });
-                    path.push({ type: 'plunge', x: x1, y: y1, z: -currentDepth });
                     code += `G1 X${x1.toFixed(3)} Y${y4.toFixed(3)} F${feedRate} ; Cut left side\n`;
                     path.push({ type: 'cut', x: x1, y: y4, z: -currentDepth });
+                    if (useArcLeadInOut) {
+                      code += `G3 X${x1.toFixed(3)} Y${leftLeadOutY.toFixed(3)} I0 J${arcRadius.toFixed(3)} F${feedRate} ; Arc lead-out\n`;
+                      path.push({ type: 'arc', x: x1, y: leftLeadOutY, z: -currentDepth, cx: x1, cy: y4 });
+                    }
                     code += `G0 Z${safeZ} ; Retract\n`;
                     path.push({ type: 'retract', x: x1, y: y4, z: safeZ });
                     // Rapid to right side
                     code += `G0 X${x2.toFixed(3)} Y${y2.toFixed(3)} ; Rapid to right side start\n`;
                     path.push({ type: 'rapid', x: x2, y: y2, z: safeZ });
                     // Right side
-                    code += `G1 Z${-currentDepth.toFixed(3)} F${feedRate / 2} ; Plunge to depth\n`;
-                    path.push({ type: 'plunge', x: x2, y: y2, z: -currentDepth });
+                    const rightLeadStartY = y2 - arcRadius;
+                    const rightLeadOutY = y3 + arcRadius;
+                    if (useArcLeadInOut) {
+                      code += `G0 X${x2.toFixed(3)} Y${rightLeadStartY.toFixed(3)} Z${safeZ} ; Arc lead-in start\n`;
+                      code += `G3 X${x2.toFixed(3)} Y${y2.toFixed(3)} Z${-currentDepth.toFixed(3)} I0 J${arcRadius.toFixed(3)} F${feedRate / 2} ; Arc lead-in\n`;
+                      path.push({ type: 'rapid', x: x2, y: rightLeadStartY, z: safeZ });
+                      path.push({ type: 'arc', x: x2, y: y2, z: -currentDepth, cx: x2, cy: y2 });
+                    } else {
+                      code += `G0 X${x2.toFixed(3)} Y${y2.toFixed(3)} ; Move to start position\n`;
+                      code += `G1 Z${-currentDepth.toFixed(3)} F${feedRate / 2} ; Plunge to depth\n`;
+                      path.push({ type: 'rapid', x: x2, y: y2, z: safeZ });
+                      path.push({ type: 'plunge', x: x2, y: y2, z: -currentDepth });
+                    }
                     code += `G1 X${x3.toFixed(3)} Y${y3.toFixed(3)} F${feedRate} ; Cut right side\n`;
                     path.push({ type: 'cut', x: x3, y: y3, z: -currentDepth });
+                    if (useArcLeadInOut) {
+                      code += `G3 X${x3.toFixed(3)} Y${rightLeadOutY.toFixed(3)} I0 J${arcRadius.toFixed(3)} F${feedRate} ; Arc lead-out\n`;
+                      path.push({ type: 'arc', x: x3, y: rightLeadOutY, z: -currentDepth, cx: x3, cy: y3 });
+                    }
                     code += `G0 Z${safeZ} ; Retract to safe height\n\n`;
                     path.push({ type: 'retract', x: x3, y: y3, z: safeZ });
                     
@@ -175,27 +259,105 @@
                     // Cut only top and bottom sides (X is at final dimension)
                     code += `; Cutting Y sides only (X at final dimension)\n`;
                     // Bottom side
-                    code += `G1 Z${-currentDepth.toFixed(3)} F${feedRate / 2} ; Plunge to depth\n`;
+                    const arcRadius = toolRadius;
+                    const bottomLeadStartX = x1 - arcRadius;
+                    const bottomLeadOutX = x2 + arcRadius;
+                    code += `G0 Z${safeZ} ; Move to safe height\n`;
+                    if (useArcLeadInOut) {
+                      code += `G0 X${bottomLeadStartX.toFixed(3)} Y${y1.toFixed(3)} Z${safeZ} ; Arc lead-in start\n`;
+                      code += `G3 X${x1.toFixed(3)} Y${y1.toFixed(3)} Z${-currentDepth.toFixed(3)} I${arcRadius.toFixed(3)} J0 F${feedRate / 2} ; Arc lead-in\n`;
+                      path.push({ type: 'rapid', x: bottomLeadStartX, y: y1, z: safeZ });
+                      path.push({ type: 'arc', x: x1, y: y1, z: -currentDepth, cx: x1, cy: y1 });
+                    } else {
+                      code += `G0 X${x1.toFixed(3)} Y${y1.toFixed(3)} ; Move to start position\n`;
+                      code += `G1 Z${-currentDepth.toFixed(3)} F${feedRate / 2} ; Plunge to depth\n`;
+                      path.push({ type: 'rapid', x: x1, y: y1, z: safeZ });
+                      path.push({ type: 'plunge', x: x1, y: y1, z: -currentDepth });
+                    }
                     path.push({ type: 'pass', lateralPass: lateralPass + 1, verticalPass: verticalPass, depth: currentDepth, offset: yOffset });
-                    path.push({ type: 'plunge', x: x1, y: y1, z: -currentDepth });
                     code += `G1 X${x2.toFixed(3)} Y${y2.toFixed(3)} F${feedRate} ; Cut bottom side\n`;
                     path.push({ type: 'cut', x: x2, y: y2, z: -currentDepth });
+                    if (useArcLeadInOut) {
+                      code += `G3 X${bottomLeadOutX.toFixed(3)} Y${y2.toFixed(3)} I${arcRadius.toFixed(3)} J0 F${feedRate} ; Arc lead-out\n`;
+                      path.push({ type: 'arc', x: bottomLeadOutX, y: y2, z: -currentDepth, cx: x2, cy: y2 });
+                    }
                     code += `G0 Z${safeZ} ; Retract\n`;
                     path.push({ type: 'retract', x: x2, y: y2, z: safeZ });
                     // Rapid to top side
                     code += `G0 X${x4.toFixed(3)} Y${y4.toFixed(3)} ; Rapid to top side start\n`;
                     path.push({ type: 'rapid', x: x4, y: y4, z: safeZ });
                     // Top side
-                    code += `G1 Z${-currentDepth.toFixed(3)} F${feedRate / 2} ; Plunge to depth\n`;
-                    path.push({ type: 'plunge', x: x4, y: y4, z: -currentDepth });
+                    const topLeadStartX = x4 - arcRadius;
+                    const topLeadOutX = x3 + arcRadius;
+                    if (useArcLeadInOut) {
+                      code += `G0 X${topLeadStartX.toFixed(3)} Y${y4.toFixed(3)} Z${safeZ} ; Arc lead-in start\n`;
+                      code += `G3 X${x4.toFixed(3)} Y${y4.toFixed(3)} Z${-currentDepth.toFixed(3)} I${arcRadius.toFixed(3)} J0 F${feedRate / 2} ; Arc lead-in\n`;
+                      path.push({ type: 'rapid', x: topLeadStartX, y: y4, z: safeZ });
+                      path.push({ type: 'arc', x: x4, y: y4, z: -currentDepth, cx: x4, cy: y4 });
+                    } else {
+                      code += `G0 X${x4.toFixed(3)} Y${y4.toFixed(3)} ; Move to start position\n`;
+                      code += `G1 Z${-currentDepth.toFixed(3)} F${feedRate / 2} ; Plunge to depth\n`;
+                      path.push({ type: 'rapid', x: x4, y: y4, z: safeZ });
+                      path.push({ type: 'plunge', x: x4, y: y4, z: -currentDepth });
+                    }
                     code += `G1 X${x3.toFixed(3)} Y${y3.toFixed(3)} F${feedRate} ; Cut top side\n`;
                     path.push({ type: 'cut', x: x3, y: y3, z: -currentDepth });
+                    if (useArcLeadInOut) {
+                      code += `G3 X${topLeadOutX.toFixed(3)} Y${y3.toFixed(3)} I${arcRadius.toFixed(3)} J0 F${feedRate} ; Arc lead-out\n`;
+                      path.push({ type: 'arc', x: topLeadOutX, y: y3, z: -currentDepth, cx: x3, cy: y3 });
+                    }
                     code += `G0 Z${safeZ} ; Retract to safe height\n\n`;
                     path.push({ type: 'retract', x: x3, y: y3, z: safeZ });
                   }
                   // If both are false, skip this pass entirely (shouldn't happen in practice)
                   
                   verticalPass++;
+              }
+            }
+            if (enableFinishingPass) {
+              const finishX1 = finalX0 - toolRadius, finishY1 = finalY0 - toolRadius;
+              const finishX2 = finalX1 + toolRadius, finishY2 = finalY0 - toolRadius;
+              const finishX3 = finalX1 + toolRadius, finishY3 = finalY1 + toolRadius;
+              const finishX4 = finalX0 - toolRadius, finishY4 = finalY1 + toolRadius;
+              code += `\n; === Finishing Pass ===\n`;
+              let finishDepth = 0, finishVertical = 1;
+              while (finishDepth < totalDepth) {
+                finishDepth += cutDepth;
+                if (finishDepth > totalDepth) finishDepth = totalDepth;
+                code += `; Finish Vertical Pass ${finishVertical} - Depth: ${finishDepth.toFixed(2)}mm\n`;
+                const arcRadius = toolRadius;
+                const leadStartX = finishX1 - arcRadius;
+                const leadStartY = finishY1 - arcRadius;
+                const leadOutX = finishX1 - arcRadius;
+                const leadOutY = finishY1 - arcRadius;
+                code += `G0 Z${safeZ} ; Move to safe height\n`;
+                if (useArcLeadInOut) {
+                  code += `G0 X${leadStartX.toFixed(3)} Y${leadStartY.toFixed(3)} Z${safeZ} ; Finish arc lead-in start\n`;
+                  code += `G3 X${finishX1.toFixed(3)} Y${finishY1.toFixed(3)} Z${-finishDepth.toFixed(3)} I${arcRadius.toFixed(3)} J0 F${finishFeed / 2} ; Finish arc lead-in\n`;
+                  path.push({ type: 'rapid', x: leadStartX, y: leadStartY, z: safeZ, isFinish: true });
+                  path.push({ type: 'arc', x: finishX1, y: finishY1, z: -finishDepth, cx: finishX1, cy: leadStartY, isFinish: true });
+                } else {
+                  code += `G0 X${finishX1.toFixed(3)} Y${finishY1.toFixed(3)} ; Finish start position\n`;
+                  code += `G1 Z${-finishDepth.toFixed(3)} F${finishFeed / 2} ; Finish plunge\n`;
+                  path.push({ type: 'rapid', x: finishX1, y: finishY1, z: safeZ, isFinish: true });
+                  path.push({ type: 'plunge', x: finishX1, y: finishY1, z: -finishDepth, isFinish: true });
+                }
+                path.push({ type: 'pass', lateralPass: 'Finish', verticalPass: finishVertical, depth: finishDepth, offset: toolRadius, isFinish: true });
+                code += `G1 X${finishX2.toFixed(3)} Y${finishY2.toFixed(3)} F${finishFeed} ; Finish to bottom-right\n`;
+                path.push({ type: 'cut', x: finishX2, y: finishY2, z: -finishDepth, isFinish: true });
+                code += `G1 X${finishX3.toFixed(3)} Y${finishY3.toFixed(3)} F${finishFeed} ; Finish to top-right\n`;
+                path.push({ type: 'cut', x: finishX3, y: finishY3, z: -finishDepth, isFinish: true });
+                code += `G1 X${finishX4.toFixed(3)} Y${finishY4.toFixed(3)} F${finishFeed} ; Finish to top-left\n`;
+                path.push({ type: 'cut', x: finishX4, y: finishY4, z: -finishDepth, isFinish: true });
+                code += `G1 X${finishX1.toFixed(3)} Y${finishY1.toFixed(3)} F${finishFeed} ; Finish to bottom-left\n`;
+                path.push({ type: 'cut', x: finishX1, y: finishY1, z: -finishDepth, isFinish: true });
+                if (useArcLeadInOut) {
+                  code += `G3 X${leadOutX.toFixed(3)} Y${leadOutY.toFixed(3)} I${(-arcRadius).toFixed(3)} J0 F${finishFeed} ; Finish arc lead-out\n`;
+                  path.push({ type: 'arc', x: leadOutX, y: leadOutY, z: -finishDepth, cx: leadOutX, cy: finishY1, isFinish: true });
+                }
+                code += `G0 Z${safeZ} ; Retract to safe height\n\n`;
+                path.push({ type: 'retract', x: finishX1, y: finishY1, z: safeZ, isFinish: true });
+                finishVertical++;
               }
             }
             code += '; Finishing\nM5 ; Stop spindle\n';
@@ -213,9 +375,10 @@
             ctx.fillStyle = '#0f172a';
             ctx.fillRect(0, 0, width, height);
             
-            const origX = parseFloat(initialX), origY = parseFloat(initialY);
+            const origX = parseFloat(stockX), origY = parseFloat(stockY);
             const x0 = 0, y0 = 0;
-            const finalSizeX = parseFloat(finalX), finalSizeY = parseFloat(finalY), toolRadius = parseFloat(toolDiameter) / 2;
+            const xRemovalPerSide = parseFloat(removePerSideX), yRemovalPerSide = parseFloat(removePerSideY);
+            const finalSizeX = origX - 2 * xRemovalPerSide, finalSizeY = origY - 2 * yRemovalPerSide, toolRadius = parseFloat(toolDiameter) / 2;
             const maxDim = Math.max(origX, origY) * 1.2, scale = Math.min(width, height) / maxDim;
             const offsetX = (width - origX * scale) / 2 - x0 * scale;
             const offsetY = height - (height - origY * scale) / 2 + y0 * scale;
@@ -225,7 +388,6 @@
             ctx.lineWidth = 2;
             ctx.strokeRect(toCanvasX(x0), toCanvasY(y0 + origY), origX * scale, origY * scale);
             
-            const xRemovalPerSide = (origX - finalSizeX) / 2, yRemovalPerSide = (origY - finalSizeY) / 2;
             const finalX0 = x0 + xRemovalPerSide, finalY0 = y0 + yRemovalPerSide;
             ctx.strokeStyle = '#3b82f6';
             ctx.setLineDash([5, 5]);
@@ -233,10 +395,13 @@
             ctx.setLineDash([]);
             
             if (currentStep > 0) {
-              let lastX = null, lastY = null, currentOffset = null;
+              let lastX = null, lastY = null, currentOffset = null, isFinishPass = false;
               for (let i = 0; i <= currentStep && i < toolPath.length; i++) {
                 const step = toolPath[i];
-                if (step.type === 'lateralPass' || step.type === 'pass') currentOffset = step.offset || 0;
+                if (step.type === 'lateralPass' || step.type === 'pass') {
+                  currentOffset = step.offset || 0;
+                  isFinishPass = step.isFinish || false;
+                }
                 if (step.type === 'rapid' && lastX !== null) {
                   // Draw rapid moves as dashed lines
                   ctx.beginPath();
@@ -248,9 +413,10 @@
                   ctx.stroke();
                   ctx.setLineDash([]);
                 }
-                if (step.type === 'cut' && lastX !== null) {
+                if ((step.type === 'cut' || step.type === 'arc') && lastX !== null) {
                   const offsetRatio = currentOffset / (Math.max(xRemovalPerSide, yRemovalPerSide) + toolRadius);
-                  const hue = 0, lightness = 50 + offsetRatio * 20;
+                  const hue = isFinishPass ? 120 : 0; // Green for finish, red for roughing
+                  const lightness = isFinishPass ? 50 : 50 + offsetRatio * 20;
                   ctx.beginPath();
                   ctx.arc(toCanvasX(lastX), toCanvasY(lastY), toolRadius * scale, 0, Math.PI * 2);
                   ctx.fillStyle = `hsla(${hue}, 90%, ${lightness}%, 0.35)`;
@@ -258,12 +424,29 @@
                   ctx.strokeStyle = `hsla(${hue}, 90%, ${lightness}%, 0.6)`;
                   ctx.lineWidth = 1;
                   ctx.stroke();
-                  ctx.beginPath();
-                  ctx.moveTo(toCanvasX(lastX), toCanvasY(lastY));
-                  ctx.lineTo(toCanvasX(step.x), toCanvasY(step.y));
-                  ctx.strokeStyle = `hsl(${hue}, 90%, ${lightness}%)`;
-                  ctx.lineWidth = 2;
-                  ctx.stroke();
+                  
+                  if (step.type === 'arc' && step.cx !== undefined && step.cy !== undefined) {
+                    // Draw arc path
+                    const centerX = toCanvasX(step.cx);
+                    const centerY = toCanvasY(step.cy);
+                    const radius = Math.sqrt(Math.pow(toCanvasX(lastX) - centerX, 2) + Math.pow(toCanvasY(lastY) - centerY, 2));
+                    const startAngle = Math.atan2(toCanvasY(lastY) - centerY, toCanvasX(lastX) - centerX);
+                    const endAngle = Math.atan2(toCanvasY(step.y) - centerY, toCanvasX(step.x) - centerX);
+                    ctx.beginPath();
+                    ctx.arc(centerX, centerY, radius, startAngle, endAngle);
+                    ctx.strokeStyle = `hsl(${hue}, 90%, ${lightness}%)`;
+                    ctx.lineWidth = 2;
+                    ctx.stroke();
+                  } else {
+                    // Draw straight line
+                    ctx.beginPath();
+                    ctx.moveTo(toCanvasX(lastX), toCanvasY(lastY));
+                    ctx.lineTo(toCanvasX(step.x), toCanvasY(step.y));
+                    ctx.strokeStyle = `hsl(${hue}, 90%, ${lightness}%)`;
+                    ctx.lineWidth = 2;
+                    ctx.stroke();
+                  }
+                  
                   ctx.beginPath();
                   ctx.arc(toCanvasX(lastX), toCanvasY(lastY), 2, 0, Math.PI * 2);
                   ctx.fillStyle = '#ffffff';
@@ -293,7 +476,7 @@
             ctx.fillText('Initial Stock', toCanvasX(x0) + 5, toCanvasY(y0 + origY) + 18);
             ctx.fillStyle = '#3b82f6';
             ctx.fillText('Final Rectangle', toCanvasX(finalX0) + 5, toCanvasY(finalY0 + finalSizeY) + 18);
-         }, [toolPath, currentStep, initialX, initialY, finalX, finalY, toolDiameter]);
+         }, [toolPath, currentStep, stockX, stockY, removePerSideX, removePerSideY, toolDiameter]);
 
           useEffect(() => {
             if (isAnimating && currentStep < toolPath.length - 1) {
@@ -327,12 +510,17 @@
                     <div className="bg-slate-700 p-4 rounded-lg">
                       <h2 className="text-xl font-semibold text-white mb-4">Stock Dimensions</h2>
                       <div className="space-y-3">
-                        <div><label className="block text-sm font-medium text-slate-300 mb-1">Final X Dimension (mm)</label><input type="number" value={finalX} onChange={(e) => setFinalX(e.target.value)} className="w-full px-3 py-2 bg-slate-600 border border-slate-500 rounded text-white focus:ring-2 focus:ring-blue-500 focus:outline-none" /></div>
-                        <div><label className="block text-sm font-medium text-slate-300 mb-1">Final Y Dimension (mm)</label><input type="number" value={finalY} onChange={(e) => setFinalY(e.target.value)} className="w-full px-3 py-2 bg-slate-600 border border-slate-500 rounded text-white focus:ring-2 focus:ring-blue-500 focus:outline-none" /></div>
-                        <div><label className="block text-sm font-medium text-slate-300 mb-1">Initial X Dimension (mm)</label><input type="number" value={initialX} onChange={(e) => setInitialX(e.target.value)} className="w-full px-3 py-2 bg-slate-600 border border-slate-500 rounded text-white focus:ring-2 focus:ring-blue-500 focus:outline-none" /></div>
-                        <div><label className="block text-sm font-medium text-slate-300 mb-1">Initial Y Dimension (mm)</label><input type="number" value={initialY} onChange={(e) => setInitialY(e.target.value)} className="w-full px-3 py-2 bg-slate-600 border border-slate-500 rounded text-white focus:ring-2 focus:ring-blue-500 focus:outline-none" /></div>
+                        <div><label className="block text-sm font-medium text-slate-300 mb-1">Stock X Dimension (mm)</label><input type="number" value={stockX} onChange={(e) => setStockX(e.target.value)} step="0.1" className="w-full px-3 py-2 bg-slate-600 border border-slate-500 rounded text-white focus:ring-2 focus:ring-blue-500 focus:outline-none" /></div>
+                        <div><label className="block text-sm font-medium text-slate-300 mb-1">Stock Y Dimension (mm)</label><input type="number" value={stockY} onChange={(e) => setStockY(e.target.value)} step="0.1" className="w-full px-3 py-2 bg-slate-600 border border-slate-500 rounded text-white focus:ring-2 focus:ring-blue-500 focus:outline-none" /></div>
                         <div><label className="block text-sm font-medium text-slate-300 mb-1">Stock Depth/Thickness (mm)</label><input type="number" value={stockDepth} onChange={(e) => setStockDepth(e.target.value)} step="0.1" className="w-full px-3 py-2 bg-slate-600 border border-slate-500 rounded text-white focus:ring-2 focus:ring-blue-500 focus:outline-none" /></div>
-                        <div className="bg-slate-600 p-3 rounded"><p className="text-xs text-slate-300"><strong>Material to remove per side:</strong><br/>X: {((parseFloat(initialX) - parseFloat(finalX)) / 2).toFixed(3)} mm<br/>Y: {((parseFloat(initialY) - parseFloat(finalY)) / 2).toFixed(3)} mm</p></div>
+                        <div className="border-t border-slate-600 pt-3 mt-3">
+                          <h3 className="text-sm font-semibold text-slate-200 mb-2">Material to Remove (per side)</h3>
+                          <div className="grid grid-cols-2 gap-3">
+                            <div><label className="block text-sm font-medium text-slate-300 mb-1">X Axis (mm)</label><input type="number" value={removePerSideX} onChange={(e) => setRemovePerSideX(e.target.value)} step="0.1" min="0" className="w-full px-3 py-2 bg-slate-600 border border-slate-500 rounded text-white focus:ring-2 focus:ring-blue-500 focus:outline-none" /></div>
+                            <div><label className="block text-sm font-medium text-slate-300 mb-1">Y Axis (mm)</label><input type="number" value={removePerSideY} onChange={(e) => setRemovePerSideY(e.target.value)} step="0.1" min="0" className="w-full px-3 py-2 bg-slate-600 border border-slate-500 rounded text-white focus:ring-2 focus:ring-blue-500 focus:outline-none" /></div>
+                          </div>
+                        </div>
+                        <div className="bg-slate-600 p-3 rounded"><p className="text-xs text-slate-300"><strong>Final dimensions:</strong><br/>X: {(parseFloat(stockX) - 2 * parseFloat(removePerSideX)).toFixed(3)} mm<br/>Y: {(parseFloat(stockY) - 2 * parseFloat(removePerSideY)).toFixed(3)} mm</p></div>
                       </div>
                     </div>
                     <div className="bg-slate-700 p-4 rounded-lg">
@@ -351,6 +539,24 @@
                         <div><label className="block text-sm font-medium text-slate-300 mb-1">Vertical Depth per Pass (mm)</label><input type="number" value={depthPerPass} onChange={(e) => setDepthPerPass(e.target.value)} step="0.1" disabled={fullDepthCut} className="w-full px-3 py-2 bg-slate-600 border border-slate-500 rounded text-white focus:ring-2 focus:ring-blue-500 focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed" /><div className="flex items-center gap-2 mt-2"><input type="checkbox" id="fullDepthCut" checked={fullDepthCut} onChange={(e) => setFullDepthCut(e.target.checked)} className="w-4 h-4 text-blue-600 bg-slate-600 border-slate-500 rounded focus:ring-blue-500" /><label htmlFor="fullDepthCut" className="text-sm text-slate-300 cursor-pointer">Full depth cut (one vertical pass per lateral pass)</label></div><p className="text-xs text-slate-400 mt-1">Number of passes: {fullDepthCut ? 1 : Math.ceil((parseFloat(stockDepth) + parseFloat(zOffset)) / parseFloat(depthPerPass))}</p></div>
                         <div><label className="block text-sm font-medium text-slate-300 mb-1">Safe Z Height (mm)</label><input type="number" value={safeZ} onChange={(e) => setSafeZ(e.target.value)} className="w-full px-3 py-2 bg-slate-600 border border-slate-500 rounded text-white focus:ring-2 focus:ring-blue-500 focus:outline-none" /></div>
                         <div><label className="block text-sm font-medium text-slate-300 mb-1">Z Depth Offset (mm)</label><input type="number" value={zOffset} onChange={(e) => setZOffset(e.target.value)} step="0.1" min="0" className="w-full px-3 py-2 bg-slate-600 border border-slate-500 rounded text-white focus:ring-2 focus:ring-blue-500 focus:outline-none" /><p className="text-xs text-slate-400 mt-1">Optional extra depth beyond stock (e.g., 0.5mm to ensure clean cut)</p><p className="text-xs text-slate-300 mt-1">Total cutting depth: {(parseFloat(stockDepth) + parseFloat(zOffset)).toFixed(2)} mm</p></div>
+                        <div className="border-t border-slate-600 pt-3">
+                          <div className="flex items-center gap-2 mb-1">
+                            <input type="checkbox" id="enableArcLeadInOut" checked={enableArcLeadInOut} onChange={(e) => setEnableArcLeadInOut(e.target.checked)} className="w-4 h-4 text-blue-600 bg-slate-600 border-slate-500 rounded focus:ring-blue-500" />
+                            <label htmlFor="enableArcLeadInOut" className="text-sm font-medium text-slate-300 cursor-pointer">Enable arc lead-in/out</label>
+                          </div>
+                          <p className="text-xs text-slate-400 mt-1">Smooth arc entry/exit with ramping (radius = tool radius). Unchecked uses vertical plunge.</p>
+                        </div>
+                        <div className="border-t border-slate-600 pt-3">
+                          <div className="flex items-center gap-2 mb-2">
+                            <input type="checkbox" id="enableFinish" checked={enableFinishingPass} onChange={(e) => setEnableFinishingPass(e.target.checked)} className="w-4 h-4 text-blue-600 bg-slate-600 border-slate-500 rounded focus:ring-blue-500" />
+                            <label htmlFor="enableFinish" className="text-sm text-slate-300 cursor-pointer">Enable finishing pass</label>
+                          </div>
+                          <div className="grid grid-cols-2 gap-3">
+                            <div><label className="block text-sm font-medium text-slate-300 mb-1">Finish Allowance (mm)</label><input type="number" value={finishAllowance} onChange={(e) => setFinishAllowance(e.target.value)} step="0.05" min="0" disabled={!enableFinishingPass} className="w-full px-3 py-2 bg-slate-600 border border-slate-500 rounded text-white focus:ring-2 focus:ring-blue-500 focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed" /></div>
+                            <div><label className="block text-sm font-medium text-slate-300 mb-1">Finish Feed Rate (mm/min)</label><input type="number" value={finishFeedRate} onChange={(e) => setFinishFeedRate(e.target.value)} min="0" disabled={!enableFinishingPass} className="w-full px-3 py-2 bg-slate-600 border border-slate-500 rounded text-white focus:ring-2 focus:ring-blue-500 focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed" /></div>
+                          </div>
+                          <p className="text-xs text-slate-400 mt-1">Leaves a small allowance for the final clean-up pass.</p>
+                        </div>
                       </div>
                     </div>
                     {warnings.length > 0 && (
@@ -365,11 +571,11 @@
                       <div className="bg-slate-700 p-4 rounded-lg">
                         <h2 className="text-xl font-semibold text-white mb-4">Operation Statistics</h2>
                         <div className="grid grid-cols-2 gap-3">
-                          <div className="bg-slate-800 p-3 rounded"><p className="text-xs text-slate-400">Lateral Passes</p><p className="text-2xl font-bold text-blue-400">{Math.max(Math.ceil(((parseFloat(initialX) - parseFloat(finalX)) / 2) / (parseFloat(toolDiameter) * (parseFloat(percentageRemoval) / 100))), Math.ceil(((parseFloat(initialY) - parseFloat(finalY)) / 2) / (parseFloat(toolDiameter) * (parseFloat(percentageRemoval) / 100))))}</p></div>
+                          <div className="bg-slate-800 p-3 rounded"><p className="text-xs text-slate-400">Lateral Passes</p><p className="text-2xl font-bold text-blue-400">{Math.max(Math.ceil(parseFloat(removePerSideX) / (parseFloat(toolDiameter) * (parseFloat(percentageRemoval) / 100))), Math.ceil(parseFloat(removePerSideY) / (parseFloat(toolDiameter) * (parseFloat(percentageRemoval) / 100))))}</p></div>
                           <div className="bg-slate-800 p-3 rounded"><p className="text-xs text-slate-400">Vertical Passes (per lateral)</p><p className="text-2xl font-bold text-green-400">{fullDepthCut ? 1 : Math.ceil((parseFloat(stockDepth) + parseFloat(zOffset)) / parseFloat(depthPerPass))}</p></div>
-                          <div className="bg-slate-800 p-3 rounded col-span-2"><p className="text-xs text-slate-400">Total Passes</p><p className="text-3xl font-bold text-purple-400">{Math.max(Math.ceil(((parseFloat(initialX) - parseFloat(finalX)) / 2) / (parseFloat(toolDiameter) * (parseFloat(percentageRemoval) / 100))), Math.ceil(((parseFloat(initialY) - parseFloat(finalY)) / 2) / (parseFloat(toolDiameter) * (parseFloat(percentageRemoval) / 100)))) * (fullDepthCut ? 1 : Math.ceil((parseFloat(stockDepth) + parseFloat(zOffset)) / parseFloat(depthPerPass)))}</p></div>
-                          <div className="bg-slate-800 p-3 rounded"><p className="text-xs text-slate-400">Material Removed (X)</p><p className="text-lg font-bold text-slate-300">{((parseFloat(initialX) - parseFloat(finalX))).toFixed(3)} mm</p></div>
-                          <div className="bg-slate-800 p-3 rounded"><p className="text-xs text-slate-400">Material Removed (Y)</p><p className="text-lg font-bold text-slate-300">{((parseFloat(initialY) - parseFloat(finalY))).toFixed(3)} mm</p></div>
+                          <div className="bg-slate-800 p-3 rounded col-span-2"><p className="text-xs text-slate-400">Total Passes</p><p className="text-3xl font-bold text-purple-400">{Math.max(Math.ceil(parseFloat(removePerSideX) / (parseFloat(toolDiameter) * (parseFloat(percentageRemoval) / 100))), Math.ceil(parseFloat(removePerSideY) / (parseFloat(toolDiameter) * (parseFloat(percentageRemoval) / 100)))) * (fullDepthCut ? 1 : Math.ceil((parseFloat(stockDepth) + parseFloat(zOffset)) / parseFloat(depthPerPass)))}</p></div>
+                          <div className="bg-slate-800 p-3 rounded"><p className="text-xs text-slate-400">Material Removed (X)</p><p className="text-lg font-bold text-slate-300">{(2 * parseFloat(removePerSideX)).toFixed(3)} mm</p></div>
+                          <div className="bg-slate-800 p-3 rounded"><p className="text-xs text-slate-400">Material Removed (Y)</p><p className="text-lg font-bold text-slate-300">{(2 * parseFloat(removePerSideY)).toFixed(3)} mm</p></div>
                         </div>
                       </div>
                     )}
@@ -404,9 +610,11 @@
                             <p className="font-semibold text-slate-300 mb-2">Legend:</p>
                             <div className="flex items-center gap-2"><div className="w-4 h-4 border-2 border-slate-500 rounded"></div><span>Initial Stock Boundary</span></div>
                             <div className="flex items-center gap-2"><div className="w-4 h-4 border-2 border-blue-500 rounded" style={{borderStyle: 'dashed'}}></div><span>Final Shape Target</span></div>
-                            <div className="flex items-center gap-2"><div className="w-4 h-1 bg-red-500"></div><span>Tool Center Path</span></div>
+                            <div className="flex items-center gap-2"><div className="w-4 h-1 bg-red-500"></div><span>Roughing Path (Red, Arc Lead-in/out)</span></div>
+                            <div className="flex items-center gap-2"><div className="w-4 h-1 bg-green-500"></div><span>Finishing Path (Green, Arc Lead-in/out)</span></div>
                             <div className="flex items-center gap-2"><div className="w-4 h-1 border-t-2 border-dashed border-yellow-400"></div><span>Rapid Move (Non-Cutting)</span></div>
-                            <div className="flex items-center gap-2"><div className="w-4 h-4 bg-red-500 opacity-40 rounded-full border border-red-400"></div><span>Material Removal Area</span></div>
+                            <div className="flex items-center gap-2"><div className="w-4 h-4 bg-red-500 opacity-40 rounded-full border border-red-400"></div><span>Roughing Material Removal</span></div>
+                            <div className="flex items-center gap-2"><div className="w-4 h-4 bg-green-500 opacity-40 rounded-full border border-green-400"></div><span>Finishing Material Removal</span></div>
                             <div className="flex items-center gap-2"><div className="w-4 h-4 border-2 border-green-500 bg-green-500 bg-opacity-30 rounded-full relative"><div className="absolute inset-0 flex items-center justify-center"><div className="w-1.5 h-1.5 bg-green-500 rounded-full border border-white"></div></div></div><span>Current Tool Position</span></div>
                             <div className="flex items-center gap-2 mt-2 pt-2 border-t border-slate-600"><div className="w-2 h-2 bg-white rounded-full"></div><span>Tool Center Point</span></div>
                           </div>
