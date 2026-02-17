@@ -8,9 +8,16 @@
     <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <style>
+        /* Custom scrollbar */
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: #1e293b; }
+        ::-webkit-scrollbar-thumb { background: #475569; border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: #64748b; }
+    </style>
 </head>
-<body>
-    <div id="root"></div>
+<body class="bg-slate-900 text-slate-200 h-screen overflow-hidden">
+    <div id="root" class="h-full flex flex-col"></div>
     
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
@@ -20,8 +27,7 @@
         const Play = () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>;
         const Pause = () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="6" y="4" width="4" height="16"></rect><rect x="14" y="4" width="4" height="16"></rect></svg>;
         const RotateCcw = () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="1 4 1 10 7 10"></polyline><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"></path></svg>;
-        const ChevronLeft = () => <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="15 18 9 12 15 6"></polyline></svg>;
-        const ChevronRight = () => <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="9 18 15 12 9 6"></polyline></svg>;
+        const ChevronDown = () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="6 9 12 15 18 9"></polyline></svg>;
         const AlertCircle = () => <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>;
 
         function App() {
@@ -29,7 +35,7 @@
           const [stockY, setStockY] = useState(110);
           const [removePerSideX, setRemovePerSideX] = useState(5);
           const [removePerSideY, setRemovePerSideY] = useState(5);
-          const [stockDepth, setStockDepth] = useState(0);
+          const [stockDepth, setStockDepth] = useState(5);
           const [toolDiameter, setToolDiameter] = useState(3.175);
           const [percentageRemoval, setPercentageRemoval] = useState(5);
           const [feedRate, setFeedRate] = useState(800);
@@ -49,6 +55,7 @@
           const [isAnimating, setIsAnimating] = useState(false);
           const [currentStep, setCurrentStep] = useState(0);
           const [animationSpeed, setAnimationSpeed] = useState(50);
+          const [legendCollapsed, setLegendCollapsed] = useState(false);
           const canvasRef = useRef(null);
           const animationRef = useRef(null);
 
@@ -369,11 +376,20 @@
           };
 
           useEffect(() => {
-            if (!canvasRef.current || toolPath.length === 0) return;
-            const canvas = canvasRef.current, ctx = canvas.getContext('2d');
+            if (!canvasRef.current) return;
+            const canvas = canvasRef.current;
+            const ctx = canvas.getContext('2d');
+            const parent = canvas.parentElement;
+            
+            // Set canvas size to match parent
+            canvas.width = parent.clientWidth;
+            canvas.height = parent.clientHeight;
+            
             const width = canvas.width, height = canvas.height;
             ctx.fillStyle = '#0f172a';
             ctx.fillRect(0, 0, width, height);
+            
+            if (toolPath.length === 0) return;
             
             const origX = parseFloat(stockX), origY = parseFloat(stockY);
             const x0 = 0, y0 = 0;
@@ -481,7 +497,9 @@
           useEffect(() => {
             if (isAnimating && currentStep < toolPath.length - 1) {
               animationRef.current = setTimeout(() => setCurrentStep(s => s + 1), animationSpeed);
-            } else if (currentStep >= toolPath.length - 1) setIsAnimating(false);
+            } else if (currentStep >= toolPath.length - 1) {
+              setIsAnimating(false);
+            }
             return () => { if (animationRef.current) clearTimeout(animationRef.current); };
           }, [isAnimating, currentStep, toolPath.length, animationSpeed]);
 
@@ -496,138 +514,209 @@
           };
 
           return (
-            <div className="min-h-screen bg-gradient-to-br from-slate-900 to-slate-800 p-6">
-              <div className="max-w-6xl mx-auto bg-slate-800 rounded-lg shadow-2xl overflow-hidden border border-slate-700">
-                <div className="bg-gradient-to-r from-blue-600 to-blue-700 p-6">
-                  <h1 className="text-3xl font-bold text-white flex items-center gap-3">
-                    <Settings />
-                    CNC Stock Squaring G-code Generator
-                  </h1>
-                  <p className="text-blue-100 mt-2">Square off irregular stock by machining around the perimeter</p>
+            <div className="h-full flex flex-col p-3 gap-3">
+              {/* Header */}
+              <div className="flex items-center justify-between h-12 shrink-0">
+                <div className="flex items-center gap-2 text-blue-400">
+                  <Settings />
+                  <h1 className="text-xl font-bold tracking-tight text-white">CNC Stock Squaring Generator</h1>
                 </div>
-                <div className="grid md:grid-cols-2 gap-6 p-6">
-                  <div className="space-y-4">
-                    <div className="bg-slate-700 p-4 rounded-lg">
-                      <h2 className="text-xl font-semibold text-white mb-4">Stock Dimensions</h2>
-                      <div className="space-y-3">
-                        <div><label className="block text-sm font-medium text-slate-300 mb-1">Stock X Dimension (mm)</label><input type="number" value={stockX} onChange={(e) => setStockX(e.target.value)} step="0.1" className="w-full px-3 py-2 bg-slate-600 border border-slate-500 rounded text-white focus:ring-2 focus:ring-blue-500 focus:outline-none" /></div>
-                        <div><label className="block text-sm font-medium text-slate-300 mb-1">Stock Y Dimension (mm)</label><input type="number" value={stockY} onChange={(e) => setStockY(e.target.value)} step="0.1" className="w-full px-3 py-2 bg-slate-600 border border-slate-500 rounded text-white focus:ring-2 focus:ring-blue-500 focus:outline-none" /></div>
-                        <div><label className="block text-sm font-medium text-slate-300 mb-1">Stock Depth/Thickness (mm)</label><input type="number" value={stockDepth} onChange={(e) => setStockDepth(e.target.value)} step="0.1" className="w-full px-3 py-2 bg-slate-600 border border-slate-500 rounded text-white focus:ring-2 focus:ring-blue-500 focus:outline-none" /></div>
-                        <div className="border-t border-slate-600 pt-3 mt-3">
-                          <h3 className="text-sm font-semibold text-slate-200 mb-2">Material to Remove (per side)</h3>
-                          <div className="grid grid-cols-2 gap-3">
-                            <div><label className="block text-sm font-medium text-slate-300 mb-1">X Axis (mm)</label><input type="number" value={removePerSideX} onChange={(e) => setRemovePerSideX(e.target.value)} step="0.1" min="0" className="w-full px-3 py-2 bg-slate-600 border border-slate-500 rounded text-white focus:ring-2 focus:ring-blue-500 focus:outline-none" /></div>
-                            <div><label className="block text-sm font-medium text-slate-300 mb-1">Y Axis (mm)</label><input type="number" value={removePerSideY} onChange={(e) => setRemovePerSideY(e.target.value)} step="0.1" min="0" className="w-full px-3 py-2 bg-slate-600 border border-slate-500 rounded text-white focus:ring-2 focus:ring-blue-500 focus:outline-none" /></div>
-                          </div>
-                        </div>
-                        <div className="bg-slate-600 p-3 rounded"><p className="text-xs text-slate-300"><strong>Final dimensions:</strong><br/>X: {(parseFloat(stockX) - 2 * parseFloat(removePerSideX)).toFixed(3)} mm<br/>Y: {(parseFloat(stockY) - 2 * parseFloat(removePerSideY)).toFixed(3)} mm</p></div>
-                      </div>
-                    </div>
-                    <div className="bg-slate-700 p-4 rounded-lg">
-                      <h2 className="text-xl font-semibold text-white mb-4">Tool Settings</h2>
-                      <div className="space-y-3">
-                        <div><label className="block text-sm font-medium text-slate-300 mb-1">Tool Diameter (mm)</label><input type="number" value={toolDiameter} onChange={(e) => setToolDiameter(e.target.value)} className="w-full px-3 py-2 bg-slate-600 border border-slate-500 rounded text-white focus:ring-2 focus:ring-blue-500 focus:outline-none" /></div>
-                        <div><label className="block text-sm font-medium text-slate-300 mb-1">Removal Percentage (% of tool diameter)</label><input type="number" value={percentageRemoval} onChange={(e) => setPercentageRemoval(e.target.value)} min="1" max="100" className="w-full px-3 py-2 bg-slate-600 border border-slate-500 rounded text-white focus:ring-2 focus:ring-blue-500 focus:outline-none" /><p className="text-xs text-slate-400 mt-1">Actual removal per pass: {(parseFloat(toolDiameter) * (parseFloat(percentageRemoval) / 100)).toFixed(3)} mm</p></div>
-                      </div>
-                    </div>
-                    <div className="bg-slate-700 p-4 rounded-lg">
-                      <h2 className="text-xl font-semibold text-white mb-4">Cutting Parameters</h2>
-                      <div className="space-y-3">
-                        <div><label className="block text-sm font-medium text-slate-300 mb-1">Feed Rate (mm/min)</label><input type="number" value={feedRate} onChange={(e) => setFeedRate(e.target.value)} className="w-full px-3 py-2 bg-slate-600 border border-slate-500 rounded text-white focus:ring-2 focus:ring-blue-500 focus:outline-none" /></div>
-                        <div><label className="block text-sm font-medium text-slate-300 mb-1">Spindle Speed (RPM)</label><input type="number" value={spindleSpeed} onChange={(e) => setSpindleSpeed(e.target.value)} className="w-full px-3 py-2 bg-slate-600 border border-slate-500 rounded text-white focus:ring-2 focus:ring-blue-500 focus:outline-none" /></div>
-                        <div><label className="block text-sm font-medium text-slate-300 mb-1">Spindle Startup Delay (seconds)</label><input type="number" value={spindleDelay} onChange={(e) => setSpindleDelay(e.target.value)} step="0.5" min="0" className="w-full px-3 py-2 bg-slate-600 border border-slate-500 rounded text-white focus:ring-2 focus:ring-blue-500 focus:outline-none" /><p className="text-xs text-slate-400 mt-1">Time to wait for spindle to reach full speed</p></div>
-                        <div><label className="block text-sm font-medium text-slate-300 mb-1">Vertical Depth per Pass (mm)</label><input type="number" value={depthPerPass} onChange={(e) => setDepthPerPass(e.target.value)} step="0.1" disabled={fullDepthCut} className="w-full px-3 py-2 bg-slate-600 border border-slate-500 rounded text-white focus:ring-2 focus:ring-blue-500 focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed" /><div className="flex items-center gap-2 mt-2"><input type="checkbox" id="fullDepthCut" checked={fullDepthCut} onChange={(e) => setFullDepthCut(e.target.checked)} className="w-4 h-4 text-blue-600 bg-slate-600 border-slate-500 rounded focus:ring-blue-500" /><label htmlFor="fullDepthCut" className="text-sm text-slate-300 cursor-pointer">Full depth cut (one vertical pass per lateral pass)</label></div><p className="text-xs text-slate-400 mt-1">Number of passes: {fullDepthCut ? 1 : Math.ceil((parseFloat(stockDepth) + parseFloat(zOffset)) / parseFloat(depthPerPass))}</p></div>
-                        <div><label className="block text-sm font-medium text-slate-300 mb-1">Safe Z Height (mm)</label><input type="number" value={safeZ} onChange={(e) => setSafeZ(e.target.value)} className="w-full px-3 py-2 bg-slate-600 border border-slate-500 rounded text-white focus:ring-2 focus:ring-blue-500 focus:outline-none" /></div>
-                        <div><label className="block text-sm font-medium text-slate-300 mb-1">Z Depth Offset (mm)</label><input type="number" value={zOffset} onChange={(e) => setZOffset(e.target.value)} step="0.1" min="0" className="w-full px-3 py-2 bg-slate-600 border border-slate-500 rounded text-white focus:ring-2 focus:ring-blue-500 focus:outline-none" /><p className="text-xs text-slate-400 mt-1">Optional extra depth beyond stock (e.g., 0.5mm to ensure clean cut)</p><p className="text-xs text-slate-300 mt-1">Total cutting depth: {(parseFloat(stockDepth) + parseFloat(zOffset)).toFixed(2)} mm</p></div>
-                        <div className="border-t border-slate-600 pt-3">
-                          <div className="flex items-center gap-2 mb-1">
-                            <input type="checkbox" id="enableArcLeadInOut" checked={enableArcLeadInOut} onChange={(e) => setEnableArcLeadInOut(e.target.checked)} className="w-4 h-4 text-blue-600 bg-slate-600 border-slate-500 rounded focus:ring-blue-500" />
-                            <label htmlFor="enableArcLeadInOut" className="text-sm font-medium text-slate-300 cursor-pointer">Enable arc lead-in/out</label>
-                          </div>
-                          <p className="text-xs text-slate-400 mt-1">Smooth arc entry/exit with ramping (radius = tool radius). Unchecked uses vertical plunge.</p>
-                        </div>
-                        <div className="border-t border-slate-600 pt-3">
-                          <div className="flex items-center gap-2 mb-2">
-                            <input type="checkbox" id="enableFinish" checked={enableFinishingPass} onChange={(e) => setEnableFinishingPass(e.target.checked)} className="w-4 h-4 text-blue-600 bg-slate-600 border-slate-500 rounded focus:ring-blue-500" />
-                            <label htmlFor="enableFinish" className="text-sm text-slate-300 cursor-pointer">Enable finishing pass</label>
-                          </div>
-                          <div className="grid grid-cols-2 gap-3">
-                            <div><label className="block text-sm font-medium text-slate-300 mb-1">Finish Allowance (mm)</label><input type="number" value={finishAllowance} onChange={(e) => setFinishAllowance(e.target.value)} step="0.05" min="0" disabled={!enableFinishingPass} className="w-full px-3 py-2 bg-slate-600 border border-slate-500 rounded text-white focus:ring-2 focus:ring-blue-500 focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed" /></div>
-                            <div><label className="block text-sm font-medium text-slate-300 mb-1">Finish Feed Rate (mm/min)</label><input type="number" value={finishFeedRate} onChange={(e) => setFinishFeedRate(e.target.value)} min="0" disabled={!enableFinishingPass} className="w-full px-3 py-2 bg-slate-600 border border-slate-500 rounded text-white focus:ring-2 focus:ring-blue-500 focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed" /></div>
-                          </div>
-                          <p className="text-xs text-slate-400 mt-1">Leaves a small allowance for the final clean-up pass.</p>
+                <button 
+                  onClick={downloadGcode}
+                  disabled={!gcode}
+                  className="bg-green-600 hover:bg-green-500 disabled:bg-slate-700 disabled:cursor-not-allowed text-white text-xs font-bold py-2 px-4 rounded flex items-center gap-2 transition-colors"
+                >
+                  <Download /> Save G-code
+                </button>
+              </div>
+
+              {/* Main Grid */}
+              <div className="grid grid-cols-12 gap-3 flex-1 overflow-hidden">
+                {/* Left Panel - Controls */}
+                <div className="col-span-3 bg-slate-800 rounded-lg p-3 flex flex-col gap-3 overflow-y-auto border border-slate-700 shadow-xl">
+                  {/* Stock Dimensions */}
+                  <div>
+                    <h2 className="text-xs font-bold text-blue-400 uppercase tracking-wider mb-2">Stock Dimensions (mm)</h2>
+                    <div className="space-y-2">
+                      <div><label className="text-xs font-medium text-slate-400 block mb-1">Stock X Dimension</label><input type="number" value={stockX} onChange={(e) => setStockX(e.target.value)} step="0.1" className="w-full px-2 py-1 bg-slate-900 border border-slate-700 rounded text-sm text-blue-100 focus:outline-none focus:border-blue-500" /></div>
+                      <div><label className="text-xs font-medium text-slate-400 block mb-1">Stock Y Dimension</label><input type="number" value={stockY} onChange={(e) => setStockY(e.target.value)} step="0.1" className="w-full px-2 py-1 bg-slate-900 border border-slate-700 rounded text-sm text-blue-100 focus:outline-none focus:border-blue-500" /></div>
+                      <div><label className="text-xs font-medium text-slate-400 block mb-1">Stock Depth/Thickness</label><input type="number" value={stockDepth} onChange={(e) => setStockDepth(e.target.value)} step="0.1" className="w-full px-2 py-1 bg-slate-900 border border-slate-700 rounded text-sm text-blue-100 focus:outline-none focus:border-blue-500" /></div>
+                      <div className="border-t border-slate-700 pt-2 mt-2">
+                        <p className="text-xs text-slate-400 mb-2">Material to Remove (per side)</p>
+                        <div className="grid grid-cols-2 gap-2">
+                          <div><label className="text-xs text-slate-400 block mb-1">X Axis</label><input type="number" value={removePerSideX} onChange={(e) => setRemovePerSideX(e.target.value)} step="0.1" min="0" className="w-full px-2 py-1 bg-slate-900 border border-slate-700 rounded text-sm text-blue-100 focus:outline-none focus:border-blue-500" /></div>
+                          <div><label className="text-xs text-slate-400 block mb-1">Y Axis</label><input type="number" value={removePerSideY} onChange={(e) => setRemovePerSideY(e.target.value)} step="0.1" min="0" className="w-full px-2 py-1 bg-slate-900 border border-slate-700 rounded text-sm text-blue-100 focus:outline-none focus:border-blue-500" /></div>
                         </div>
                       </div>
+                      <div className="bg-slate-900/50 p-2 rounded border border-slate-700/50"><p className="text-[10px] text-slate-400"><strong className="text-slate-300">Final:</strong> X: {(parseFloat(stockX) - 2 * parseFloat(removePerSideX)).toFixed(2)}mm, Y: {(parseFloat(stockY) - 2 * parseFloat(removePerSideY)).toFixed(2)}mm</p></div>
                     </div>
-                    {warnings.length > 0 && (
-                      <div className="bg-yellow-900 border border-yellow-600 p-4 rounded-lg">
-                        <div className="flex items-start gap-2"><AlertCircle /><div><h3 className="text-yellow-200 font-semibold mb-1">Warnings:</h3><ul className="text-sm text-yellow-100 space-y-1">{warnings.map((warn, idx) => <li key={idx}>• {warn}</li>)}</ul></div></div>
-                      </div>
-                    )}
-                    <button onClick={generateGcode} className="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 px-6 rounded-lg transition duration-200 shadow-lg">Generate G-code</button>
                   </div>
-                  <div className="space-y-4">
-                    {gcode && (
-                      <div className="bg-slate-700 p-4 rounded-lg">
-                        <h2 className="text-xl font-semibold text-white mb-4">Operation Statistics</h2>
-                        <div className="grid grid-cols-2 gap-3">
-                          <div className="bg-slate-800 p-3 rounded"><p className="text-xs text-slate-400">Lateral Passes</p><p className="text-2xl font-bold text-blue-400">{Math.max(Math.ceil(parseFloat(removePerSideX) / (parseFloat(toolDiameter) * (parseFloat(percentageRemoval) / 100))), Math.ceil(parseFloat(removePerSideY) / (parseFloat(toolDiameter) * (parseFloat(percentageRemoval) / 100))))}</p></div>
-                          <div className="bg-slate-800 p-3 rounded"><p className="text-xs text-slate-400">Vertical Passes (per lateral)</p><p className="text-2xl font-bold text-green-400">{fullDepthCut ? 1 : Math.ceil((parseFloat(stockDepth) + parseFloat(zOffset)) / parseFloat(depthPerPass))}</p></div>
-                          <div className="bg-slate-800 p-3 rounded col-span-2"><p className="text-xs text-slate-400">Total Passes</p><p className="text-3xl font-bold text-purple-400">{Math.max(Math.ceil(parseFloat(removePerSideX) / (parseFloat(toolDiameter) * (parseFloat(percentageRemoval) / 100))), Math.ceil(parseFloat(removePerSideY) / (parseFloat(toolDiameter) * (parseFloat(percentageRemoval) / 100)))) * (fullDepthCut ? 1 : Math.ceil((parseFloat(stockDepth) + parseFloat(zOffset)) / parseFloat(depthPerPass)))}</p></div>
-                          <div className="bg-slate-800 p-3 rounded"><p className="text-xs text-slate-400">Material Removed (X)</p><p className="text-lg font-bold text-slate-300">{(2 * parseFloat(removePerSideX)).toFixed(3)} mm</p></div>
-                          <div className="bg-slate-800 p-3 rounded"><p className="text-xs text-slate-400">Material Removed (Y)</p><p className="text-lg font-bold text-slate-300">{(2 * parseFloat(removePerSideY)).toFixed(3)} mm</p></div>
+
+                  <div className="w-full h-px bg-slate-700"></div>
+
+                  {/* Tool & Cutting Parameters */}
+                  <div>
+                    <h2 className="text-xs font-bold text-purple-400 uppercase tracking-wider mb-2">Tool & Cutting</h2>
+                    <div className="space-y-2">
+                      <div className="grid grid-cols-2 gap-2">
+                        <div><label className="text-xs text-slate-400 block mb-1">Tool Diameter</label><input type="number" value={toolDiameter} onChange={(e) => setToolDiameter(e.target.value)} className="w-full px-2 py-1 bg-slate-900 border border-slate-700 rounded text-sm text-blue-100 focus:outline-none focus:border-blue-500" /></div>
+                        <div><label className="text-xs text-slate-400 block mb-1">Stepover %</label><input type="number" value={percentageRemoval} onChange={(e) => setPercentageRemoval(e.target.value)} min="1" max="100" className="w-full px-2 py-1 bg-slate-900 border border-slate-700 rounded text-sm text-blue-100 focus:outline-none focus:border-blue-500" /></div>
+                      </div>
+                      <p className="text-[10px] text-slate-500">Actual: {(parseFloat(toolDiameter) * (parseFloat(percentageRemoval) / 100)).toFixed(3)}mm per pass</p>
+                      <div className="grid grid-cols-2 gap-2">
+                        <div><label className="text-xs text-slate-400 block mb-1">Feed (mm/min)</label><input type="number" value={feedRate} onChange={(e) => setFeedRate(e.target.value)} className="w-full px-2 py-1 bg-slate-900 border border-slate-700 rounded text-sm text-blue-100 focus:outline-none focus:border-blue-500" /></div>
+                        <div><label className="text-xs text-slate-400 block mb-1">RPM</label><input type="number" value={spindleSpeed} onChange={(e) => setSpindleSpeed(e.target.value)} className="w-full px-2 py-1 bg-slate-900 border border-slate-700 rounded text-sm text-blue-100 focus:outline-none focus:border-blue-500" /></div>
+                      </div>
+                      <div><label className="text-xs text-slate-400 block mb-1">Spindle Delay (sec)</label><input type="number" value={spindleDelay} onChange={(e) => setSpindleDelay(e.target.value)} step="0.5" min="0" className="w-full px-2 py-1 bg-slate-900 border border-slate-700 rounded text-sm text-blue-100 focus:outline-none focus:border-blue-500" /></div>
+                      <div className="grid grid-cols-2 gap-2">
+                        <div><label className="text-xs text-slate-400 block mb-1">Depth/Pass</label><input type="number" value={depthPerPass} onChange={(e) => setDepthPerPass(e.target.value)} step="0.1" disabled={fullDepthCut} className="w-full px-2 py-1 bg-slate-900 border border-slate-700 rounded text-sm text-blue-100 focus:outline-none focus:border-blue-500 disabled:opacity-50" /></div>
+                        <div className="flex items-end pb-1"><label className="flex items-center gap-1 cursor-pointer"><input type="checkbox" id="fullDepthCut" checked={fullDepthCut} onChange={(e) => setFullDepthCut(e.target.checked)} className="rounded bg-slate-700 border-slate-600 text-blue-500" /><span className="text-xs text-slate-300">Full Depth</span></label></div>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2">
+                        <div><label className="text-xs text-slate-400 block mb-1">Safe Z</label><input type="number" value={safeZ} onChange={(e) => setSafeZ(e.target.value)} className="w-full px-2 py-1 bg-slate-900 border border-slate-700 rounded text-sm text-blue-100 focus:outline-none focus:border-blue-500" /></div>
+                        <div><label className="text-xs text-slate-400 block mb-1">Z Offset</label><input type="number" value={zOffset} onChange={(e) => setZOffset(e.target.value)} step="0.1" min="0" className="w-full px-2 py-1 bg-slate-900 border border-slate-700 rounded text-sm text-blue-100 focus:outline-none focus:border-blue-500" /></div>
+                      </div>
+                      <p className="text-[10px] text-slate-500">Total depth: {(parseFloat(stockDepth) + parseFloat(zOffset)).toFixed(2)}mm, Passes: {fullDepthCut ? 1 : Math.ceil((parseFloat(stockDepth) + parseFloat(zOffset)) / parseFloat(depthPerPass))}</p>
+                    </div>
+                  </div>
+
+                  <div className="w-full h-px bg-slate-700"></div>
+
+                  {/* Advanced Features */}
+                  <div>
+                    <h2 className="text-xs font-bold text-orange-400 uppercase tracking-wider mb-2">Advanced Features</h2>
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between p-2 bg-slate-900/50 rounded border border-slate-700/50">
+                        <span className="text-xs font-medium text-slate-300">Arc Lead-in/out</span>
+                        <div onClick={() => setEnableArcLeadInOut(!enableArcLeadInOut)} className={`w-8 h-4 rounded-full cursor-pointer relative transition-colors ${enableArcLeadInOut ? 'bg-blue-600' : 'bg-slate-600'}`}>
+                          <div className="absolute top-0.5 w-3 h-3 bg-white rounded-full transition-transform" style={{left: enableArcLeadInOut ? '18px' : '2px'}}></div>
                         </div>
                       </div>
-                    )}
-                    <div className="bg-slate-700 p-4 rounded-lg">
-                      <h2 className="text-xl font-semibold text-white mb-4">Tool Path Animation</h2>
-                      <div className="bg-slate-900 rounded-lg p-4 mb-4">
-                        <canvas ref={canvasRef} width={500} height={500} className="w-full h-auto border border-slate-600 rounded" />
+                      <div className="flex items-center justify-between p-2 bg-slate-900/50 rounded border border-slate-700/50">
+                        <span className="text-xs font-medium text-slate-300">Finishing Pass</span>
+                        <div onClick={() => setEnableFinishingPass(!enableFinishingPass)} className={`w-8 h-4 rounded-full cursor-pointer relative transition-colors ${enableFinishingPass ? 'bg-blue-600' : 'bg-slate-600'}`}>
+                          <div className="absolute top-0.5 w-3 h-3 bg-white rounded-full transition-transform" style={{left: enableFinishingPass ? '18px' : '2px'}}></div>
+                        </div>
                       </div>
-                      {toolPath.length > 0 && (
-                        <div className="space-y-3">
-                          <div className="flex gap-2">
-                            <button onClick={() => { if (currentStep > 0) { setCurrentStep(s => s - 1); setIsAnimating(false); }}} disabled={currentStep === 0} className="flex items-center justify-center bg-slate-600 hover:bg-slate-500 disabled:bg-slate-700 disabled:cursor-not-allowed text-white px-3 py-2 rounded transition duration-200"><ChevronLeft /></button>
-                            <button onClick={() => setIsAnimating(!isAnimating)} className="flex-1 flex items-center justify-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded transition duration-200">{isAnimating ? <><Pause />Pause</> : <><Play />Play</>}</button>
-                            <button onClick={() => { if (currentStep < toolPath.length - 1) { setCurrentStep(s => s + 1); setIsAnimating(false); }}} disabled={currentStep >= toolPath.length - 1} className="flex items-center justify-center bg-slate-600 hover:bg-slate-500 disabled:bg-slate-700 disabled:cursor-not-allowed text-white px-3 py-2 rounded transition duration-200"><ChevronRight /></button>
-                            <button onClick={() => { setCurrentStep(0); setIsAnimating(false); }} className="flex items-center justify-center gap-2 bg-slate-600 hover:bg-slate-500 text-white px-4 py-2 rounded transition duration-200"><RotateCcw /></button>
-                          </div>
-                          <div>
-                            <label className="block text-sm font-medium text-slate-300 mb-2">Animation Speed</label>
-                            <div className="flex items-center gap-3">
-                              <span className="text-xs text-slate-400">Fast</span>
-                              <input type="range" min="10" max="500" step="10" value={animationSpeed} onChange={(e) => setAnimationSpeed(parseInt(e.target.value))} className="flex-1" />
-                              <span className="text-xs text-slate-400">Slow</span>
-                            </div>
-                            <p className="text-xs text-slate-400 text-center mt-1">{animationSpeed}ms per step</p>
-                          </div>
-                          <div className="bg-slate-800 p-3 rounded">
-                            <p className="text-sm text-slate-300">Step: {currentStep} / {toolPath.length - 1}</p>
-                            {toolPath[currentStep] && toolPath[currentStep].type === 'lateralPass' && (<p className="text-sm text-purple-400 font-semibold">Lateral Pass {toolPath[currentStep].num} - Offset: {toolPath[currentStep].offset.toFixed(2)}mm</p>)}
-                            {toolPath[currentStep] && toolPath[currentStep].type === 'pass' && (<p className="text-sm text-blue-400 font-semibold">Lateral {toolPath[currentStep].lateralPass} / Vertical {toolPath[currentStep].verticalPass} - Depth: {toolPath[currentStep].depth.toFixed(2)}mm</p>)}
-                          </div>
-                          <div className="text-xs text-slate-400 space-y-1 bg-slate-800 p-3 rounded">
-                            <p className="font-semibold text-slate-300 mb-2">Legend:</p>
-                            <div className="flex items-center gap-2"><div className="w-4 h-4 border-2 border-slate-500 rounded"></div><span>Initial Stock Boundary</span></div>
-                            <div className="flex items-center gap-2"><div className="w-4 h-4 border-2 border-blue-500 rounded" style={{borderStyle: 'dashed'}}></div><span>Final Shape Target</span></div>
-                            <div className="flex items-center gap-2"><div className="w-4 h-1 bg-red-500"></div><span>Roughing Path (Red, Arc Lead-in/out)</span></div>
-                            <div className="flex items-center gap-2"><div className="w-4 h-1 bg-green-500"></div><span>Finishing Path (Green, Arc Lead-in/out)</span></div>
-                            <div className="flex items-center gap-2"><div className="w-4 h-1 border-t-2 border-dashed border-yellow-400"></div><span>Rapid Move (Non-Cutting)</span></div>
-                            <div className="flex items-center gap-2"><div className="w-4 h-4 bg-red-500 opacity-40 rounded-full border border-red-400"></div><span>Roughing Material Removal</span></div>
-                            <div className="flex items-center gap-2"><div className="w-4 h-4 bg-green-500 opacity-40 rounded-full border border-green-400"></div><span>Finishing Material Removal</span></div>
-                            <div className="flex items-center gap-2"><div className="w-4 h-4 border-2 border-green-500 bg-green-500 bg-opacity-30 rounded-full relative"><div className="absolute inset-0 flex items-center justify-center"><div className="w-1.5 h-1.5 bg-green-500 rounded-full border border-white"></div></div></div><span>Current Tool Position</span></div>
-                            <div className="flex items-center gap-2 mt-2 pt-2 border-t border-slate-600"><div className="w-2 h-2 bg-white rounded-full"></div><span>Tool Center Point</span></div>
-                          </div>
+                      {enableFinishingPass && (
+                        <div className="grid grid-cols-2 gap-2 pt-1">
+                          <div><label className="text-xs text-slate-400 block mb-1">Allowance</label><input type="number" value={finishAllowance} onChange={(e) => setFinishAllowance(e.target.value)} step="0.05" min="0" className="w-full px-2 py-1 bg-slate-900 border border-slate-700 rounded text-sm text-blue-100 focus:outline-none focus:border-blue-500" /></div>
+                          <div><label className="text-xs text-slate-400 block mb-1">Finish Feed</label><input type="number" value={finishFeedRate} onChange={(e) => setFinishFeedRate(e.target.value)} min="0" className="w-full px-2 py-1 bg-slate-900 border border-slate-700 rounded text-sm text-blue-100 focus:outline-none focus:border-blue-500" /></div>
                         </div>
                       )}
                     </div>
-                    <div className="bg-slate-700 p-4 rounded-lg flex flex-col">
-                      <div className="flex justify-between items-center mb-4">
-                        <h2 className="text-xl font-semibold text-white">Generated G-code</h2>
-                        {gcode && (<button onClick={downloadGcode} className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded transition duration-200"><Download />Download</button>)}
-                      </div>
-                      <textarea value={gcode} readOnly placeholder="G-code will appear here after generation..." className="flex-1 w-full px-3 py-2 bg-slate-900 border border-slate-600 rounded text-green-400 font-mono text-sm focus:outline-none resize-none" rows={15} />
+                  </div>
+
+                  {warnings.length > 0 && (
+                    <div className="bg-yellow-900/50 border border-yellow-600 p-2 rounded-lg">
+                      <div className="flex items-start gap-2"><AlertCircle /><div><h3 className="text-yellow-200 text-xs font-semibold mb-1">Warnings</h3><ul className="text-xs text-yellow-100 space-y-1">{warnings.map((warn, idx) => <li key={idx}>• {warn}</li>)}</ul></div></div>
                     </div>
+                  )}
+                  
+                  <button onClick={generateGcode} className="w-full bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold py-2 px-4 rounded transition-colors shadow-lg">Generate G-code</button>
+                </div>
+
+                {/* Center Panel - Canvas */}
+                <div className="col-span-6 bg-slate-800 rounded-lg border border-slate-700 relative flex flex-col shadow-2xl overflow-hidden">
+                  <div className="absolute top-3 left-3 z-10 bg-slate-900/80 backdrop-blur px-3 py-2 rounded border border-slate-700">
+                    <div className="text-xs font-mono text-blue-400 mb-1">Total Steps: {toolPath.length}</div>
+                    {toolPath.length > 0 && (
+                      <div className="text-xs font-mono text-slate-300">
+                        Current: {currentStep} / {toolPath.length - 1} ({Math.round((currentStep / (toolPath.length || 1)) * 100)}%)
+                      </div>
+                    )}
+                  </div>
+                  {toolPath.length > 0 && (() => {
+                    // Find the most recent pass information
+                    let passInfo = null;
+                    for (let i = currentStep; i >= 0; i--) {
+                      if (toolPath[i] && (toolPath[i].type === 'lateralPass' || toolPath[i].type === 'pass')) {
+                        passInfo = toolPath[i];
+                        break;
+                      }
+                    }
+                    if (!passInfo) return null;
+                    
+                    return (
+                      <div className="absolute top-3 right-3 z-10 bg-slate-900/80 backdrop-blur px-3 py-2 rounded border border-slate-700">
+                        {passInfo.type === 'lateralPass' && (
+                          <div className="text-xs font-mono text-purple-400">
+                            Lateral Pass {passInfo.num}<br/>
+                            <span className="text-slate-400">Offset: {passInfo.offset.toFixed(2)}mm</span>
+                          </div>
+                        )}
+                        {passInfo.type === 'pass' && (
+                          <div className="text-xs font-mono text-blue-400">
+                            Lateral {passInfo.lateralPass} / Vertical {passInfo.verticalPass}<br/>
+                            <span className="text-slate-400">Depth: {passInfo.depth.toFixed(2)}mm</span>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
+                  <div className="flex-1 w-full h-full bg-slate-900 relative overflow-hidden">
+                    <canvas ref={canvasRef} className="block w-full h-full"></canvas>
+                  </div>
+                  {toolPath.length > 0 && (
+                    <div className="bg-slate-800 border-t border-slate-700 px-4 py-3 shrink-0">
+                      <button onClick={() => setLegendCollapsed(!legendCollapsed)} className="flex items-center justify-between w-full text-left mb-2 hover:text-slate-200 transition">
+                        <span className="text-xs font-semibold text-slate-300">Legend</span>
+                        <div className={`text-slate-500 transition-transform ${legendCollapsed ? '' : 'rotate-180'}`}><ChevronDown /></div>
+                      </button>
+                      {!legendCollapsed && (
+                        <div className="text-xs text-slate-400 space-y-1 pb-3 mb-3 border-b border-slate-700">
+                          <div className="flex items-center gap-2"><div className="w-4 h-4 border-2 border-slate-500 rounded"></div><span>Initial Stock Boundary</span></div>
+                          <div className="flex items-center gap-2"><div className="w-4 h-4 border-2 border-blue-500 rounded" style={{borderStyle: 'dashed'}}></div><span>Final Shape Target</span></div>
+                          <div className="flex items-center gap-2"><div className="w-4 h-1 border-t-2 border-dashed border-yellow-400"></div><span>Rapid Move (Non-Cutting)</span></div>
+                          <div className="flex items-center gap-2"><div className="w-4 h-4 bg-red-500 opacity-40 rounded-full border border-red-400"></div><span>Tool Material Removal (Roughing)</span></div>
+                          <div className="flex items-center gap-2"><div className="w-4 h-4 bg-green-500 opacity-40 rounded-full border border-green-400"></div><span>Tool Material Removal (Finishing)</span></div>
+                          <div className="flex items-center gap-2"><div className="w-4 h-4 border-2 border-green-500 bg-green-500 bg-opacity-30 rounded-full relative"><div className="absolute inset-0 flex items-center justify-center"><div className="w-1.5 h-1.5 bg-green-500 rounded-full border border-white"></div></div></div><span>Current Tool Position</span></div>
+                          <div className="flex items-center gap-2 mt-1 pt-1 border-t border-slate-700"><div className="w-2 h-2 bg-white rounded-full"></div><span>Tool Center Point</span></div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  {toolPath.length > 0 && (
+                    <div className="bg-slate-800 border-t border-slate-700 px-4 py-4 shrink-0 space-y-4">
+                      <div className="flex items-center justify-between">
+                        <div className="flex gap-2">
+                          <button onClick={() => setIsAnimating(!isAnimating)} className="p-2 bg-blue-600 hover:bg-blue-500 text-white rounded-full transition-all">{isAnimating ? <Pause /> : <Play />}</button>
+                          <button onClick={() => { setCurrentStep(0); setIsAnimating(false); }} className="p-2 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded-full transition-all"><RotateCcw /></button>
+                        </div>
+                        <input type="range" min="0" max={toolPath.length - 1 || 100} value={currentStep} onChange={(e) => { setCurrentStep(parseInt(e.target.value)); setIsAnimating(false); }} className="flex-1 mx-4 accent-blue-500 h-1 bg-slate-600 rounded-lg appearance-none cursor-pointer" />
+                        <span className="text-xs font-mono text-slate-400 w-12 text-right">{Math.round((currentStep / (toolPath.length || 1)) * 100)}%</span>
+                      </div>
+                      <div className="flex items-center gap-4">
+                        <span className="text-xs text-slate-400 whitespace-nowrap">Speed:</span>
+                        <span className="text-[10px] text-slate-500">Fast</span>
+                        <input type="range" min="10" max="200" step="10" value={animationSpeed} onChange={(e) => setAnimationSpeed(parseInt(e.target.value))} className="flex-1 accent-blue-500 h-1 bg-slate-600 rounded-lg appearance-none cursor-pointer" />
+                        <span className="text-[10px] text-slate-500">Slow</span>
+                        <span className="text-xs text-slate-400 font-mono w-12 text-right">{animationSpeed}ms</span>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Right Panel - Stats & G-code */}
+                <div className="col-span-3 flex flex-col gap-3 overflow-hidden">
+                  {/* Stats */}
+                  {gcode && (
+                    <div className="bg-slate-800 p-3 rounded-lg border border-slate-700 shrink-0">
+                      <h3 className="text-xs font-bold text-slate-400 uppercase mb-2">Operation Stats</h3>
+                      <div className="space-y-2 text-xs text-slate-300">
+                        <div className="flex justify-between items-center"><span>Lateral Passes:</span><span className="text-white font-mono font-bold">{Math.max(Math.ceil(parseFloat(removePerSideX) / (parseFloat(toolDiameter) * (parseFloat(percentageRemoval) / 100))), Math.ceil(parseFloat(removePerSideY) / (parseFloat(toolDiameter) * (parseFloat(percentageRemoval) / 100))))}</span></div>
+                        <div className="flex justify-between items-center"><span>Vertical Passes:</span><span className="text-white font-mono font-bold">{fullDepthCut ? 1 : Math.ceil((parseFloat(stockDepth) + parseFloat(zOffset)) / parseFloat(depthPerPass))}</span></div>
+                        <div className="flex justify-between items-center border-t border-slate-700 pt-2"><span>Total Passes:</span><span className="text-blue-400 font-mono font-bold">{Math.max(Math.ceil(parseFloat(removePerSideX) / (parseFloat(toolDiameter) * (parseFloat(percentageRemoval) / 100))), Math.ceil(parseFloat(removePerSideY) / (parseFloat(toolDiameter) * (parseFloat(percentageRemoval) / 100)))) * (fullDepthCut ? 1 : Math.ceil((parseFloat(stockDepth) + parseFloat(zOffset)) / parseFloat(depthPerPass)))}</span></div>
+                        <div className="flex justify-between items-center"><span>Material X:</span><span className="text-white font-mono">{(2 * parseFloat(removePerSideX)).toFixed(2)}mm</span></div>
+                        <div className="flex justify-between items-center"><span>Material Y:</span><span className="text-white font-mono">{(2 * parseFloat(removePerSideY)).toFixed(2)}mm</span></div>
+                      </div>
+                    </div>
+                  )}
+                  
+                  {/* G-code Preview */}
+                  <div className="flex-1 bg-slate-800 rounded-lg border border-slate-700 overflow-hidden flex flex-col min-h-0">
+                    <div className="bg-slate-700 px-3 py-2 text-xs font-bold text-slate-300 shrink-0">G-Code Preview</div>
+                    <textarea readOnly value={gcode} placeholder="G-code will appear here..." className="flex-1 w-full bg-slate-900 p-3 text-xs font-mono text-green-400 resize-none focus:outline-none overflow-auto"></textarea>
                   </div>
                 </div>
               </div>
