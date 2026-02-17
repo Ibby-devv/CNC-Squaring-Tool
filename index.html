@@ -33,8 +33,8 @@
         function App() {
           const [stockX, setStockX] = useState(110);
           const [stockY, setStockY] = useState(110);
-          const [removePerSideX, setRemovePerSideX] = useState(5);
-          const [removePerSideY, setRemovePerSideY] = useState(5);
+          const [removeTotalX, setRemoveTotalX] = useState(5);
+          const [removeTotalY, setRemoveTotalY] = useState(5);
           const [stockDepth, setStockDepth] = useState(5);
           const [toolDiameter, setToolDiameter] = useState(3.175);
           const [percentageRemoval, setPercentageRemoval] = useState(5);
@@ -63,10 +63,12 @@
             const warns = [];
             const origX = parseFloat(stockX);
             const origY = parseFloat(stockY);
-            const xRemovalPerSideFinal = parseFloat(removePerSideX);
-            const yRemovalPerSideFinal = parseFloat(removePerSideY);
-            const finalSizeX = origX - 2 * xRemovalPerSideFinal;
-            const finalSizeY = origY - 2 * yRemovalPerSideFinal;
+            const xRemovalTotal = parseFloat(removeTotalX);
+            const yRemovalTotal = parseFloat(removeTotalY);
+            const xRemovalPerSideFinal = xRemovalTotal / 2;
+            const yRemovalPerSideFinal = yRemovalTotal / 2;
+            const finalSizeX = origX - xRemovalTotal;
+            const finalSizeY = origY - yRemovalTotal;
             const x0 = 0;
             const y0 = 0;
             const depth = parseFloat(stockDepth);
@@ -80,8 +82,8 @@
             const finishAllowanceValue = Math.max(0, parseFloat(finishAllowance) || 0);
             const finishFeed = Math.max(0, parseFloat(finishFeedRate) || feedRate);
             
-            if (xRemovalPerSideFinal < 0) warns.push(`X removal per side (${xRemovalPerSideFinal}mm) cannot be negative`);
-            if (yRemovalPerSideFinal < 0) warns.push(`Y removal per side (${yRemovalPerSideFinal}mm) cannot be negative`);
+            if (xRemovalTotal < 0) warns.push(`Total X removal (${xRemovalTotal}mm) cannot be negative`);
+            if (yRemovalTotal < 0) warns.push(`Total Y removal (${yRemovalTotal}mm) cannot be negative`);
             if (finalSizeX <= 0) warns.push(`Final X size (${finalSizeX.toFixed(3)}mm) must be positive`);
             if (finalSizeY <= 0) warns.push(`Final Y size (${finalSizeY.toFixed(3)}mm) must be positive`);
             const maxFinishAllowance = Math.min(xRemovalPerSideFinal, yRemovalPerSideFinal);
@@ -123,7 +125,7 @@
             code += `; Initial Stock Position: X0=0mm, Y0=0mm (bottom-left corner)\n`;
             code += `; Final Size: ${finalSizeX}mm x ${finalSizeY}mm\n`;
             code += `; Final Square Position: X=${finalX0.toFixed(3)} to ${finalX1.toFixed(3)}, Y=${finalY0.toFixed(3)} to ${finalY1.toFixed(3)}\n`;
-            code += `; Material to remove: X=${xRemovalPerSideFinal.toFixed(3)}mm per side, Y=${yRemovalPerSideFinal.toFixed(3)}mm per side\n`;
+            code += `; Material to remove (total): X=${xRemovalTotal.toFixed(3)}mm, Y=${yRemovalTotal.toFixed(3)}mm\n`;
             code += `; Tool Diameter: ${toolDiam}mm\n`;
             code += `; Removal: ${percentageRemoval}% of tool diameter (${removalAmount.toFixed(3)}mm per lateral pass)\n`;
             code += `; Lateral passes: ${numLateralPasses}\n`;
@@ -393,8 +395,8 @@
             
             const origX = parseFloat(stockX), origY = parseFloat(stockY);
             const x0 = 0, y0 = 0;
-            const xRemovalPerSide = parseFloat(removePerSideX), yRemovalPerSide = parseFloat(removePerSideY);
-            const finalSizeX = origX - 2 * xRemovalPerSide, finalSizeY = origY - 2 * yRemovalPerSide, toolRadius = parseFloat(toolDiameter) / 2;
+            const xRemovalPerSide = parseFloat(removeTotalX) / 2, yRemovalPerSide = parseFloat(removeTotalY) / 2;
+            const finalSizeX = origX - parseFloat(removeTotalX), finalSizeY = origY - parseFloat(removeTotalY), toolRadius = parseFloat(toolDiameter) / 2;
             const maxDim = Math.max(origX, origY) * 1.2, scale = Math.min(width, height) / maxDim;
             const offsetX = (width - origX * scale) / 2 - x0 * scale;
             const offsetY = height - (height - origY * scale) / 2 + y0 * scale;
@@ -492,7 +494,7 @@
             ctx.fillText('Initial Stock', toCanvasX(x0) + 5, toCanvasY(y0 + origY) + 18);
             ctx.fillStyle = '#3b82f6';
             ctx.fillText('Final Rectangle', toCanvasX(finalX0) + 5, toCanvasY(finalY0 + finalSizeY) + 18);
-         }, [toolPath, currentStep, stockX, stockY, removePerSideX, removePerSideY, toolDiameter]);
+         }, [toolPath, currentStep, stockX, stockY, removeTotalX, removeTotalY, toolDiameter]);
 
           useEffect(() => {
             if (isAnimating && currentStep < toolPath.length - 1) {
@@ -542,13 +544,13 @@
                       <div><label className="text-xs font-medium text-slate-400 block mb-1">Stock Y Dimension</label><input type="number" value={stockY} onChange={(e) => setStockY(e.target.value)} step="0.1" className="w-full px-2 py-1 bg-slate-900 border border-slate-700 rounded text-sm text-blue-100 focus:outline-none focus:border-blue-500" /></div>
                       <div><label className="text-xs font-medium text-slate-400 block mb-1">Stock Depth/Thickness</label><input type="number" value={stockDepth} onChange={(e) => setStockDepth(e.target.value)} step="0.1" className="w-full px-2 py-1 bg-slate-900 border border-slate-700 rounded text-sm text-blue-100 focus:outline-none focus:border-blue-500" /></div>
                       <div className="border-t border-slate-700 pt-2 mt-2">
-                        <p className="text-xs text-slate-400 mb-2">Material to Remove (per side)</p>
+                        <p className="text-xs text-slate-400 mb-2">Material to Remove (total)</p>
                         <div className="grid grid-cols-2 gap-2">
-                          <div><label className="text-xs text-slate-400 block mb-1">X Axis</label><input type="number" value={removePerSideX} onChange={(e) => setRemovePerSideX(e.target.value)} step="0.1" min="0" className="w-full px-2 py-1 bg-slate-900 border border-slate-700 rounded text-sm text-blue-100 focus:outline-none focus:border-blue-500" /></div>
-                          <div><label className="text-xs text-slate-400 block mb-1">Y Axis</label><input type="number" value={removePerSideY} onChange={(e) => setRemovePerSideY(e.target.value)} step="0.1" min="0" className="w-full px-2 py-1 bg-slate-900 border border-slate-700 rounded text-sm text-blue-100 focus:outline-none focus:border-blue-500" /></div>
+                          <div><label className="text-xs text-slate-400 block mb-1">Total X</label><input type="number" value={removeTotalX} onChange={(e) => setRemoveTotalX(e.target.value)} step="0.1" min="0" className="w-full px-2 py-1 bg-slate-900 border border-slate-700 rounded text-sm text-blue-100 focus:outline-none focus:border-blue-500" /></div>
+                          <div><label className="text-xs text-slate-400 block mb-1">Total Y</label><input type="number" value={removeTotalY} onChange={(e) => setRemoveTotalY(e.target.value)} step="0.1" min="0" className="w-full px-2 py-1 bg-slate-900 border border-slate-700 rounded text-sm text-blue-100 focus:outline-none focus:border-blue-500" /></div>
                         </div>
                       </div>
-                      <div className="bg-slate-900/50 p-2 rounded border border-slate-700/50"><p className="text-[10px] text-slate-400"><strong className="text-slate-300">Final:</strong> X: {(parseFloat(stockX) - 2 * parseFloat(removePerSideX)).toFixed(2)}mm, Y: {(parseFloat(stockY) - 2 * parseFloat(removePerSideY)).toFixed(2)}mm</p></div>
+                      <div className="bg-slate-900/50 p-2 rounded border border-slate-700/50"><p className="text-[10px] text-slate-400"><strong className="text-slate-300">Final:</strong> X: {(parseFloat(stockX) - parseFloat(removeTotalX)).toFixed(2)}mm, Y: {(parseFloat(stockY) - parseFloat(removeTotalY)).toFixed(2)}mm</p></div>
                     </div>
                   </div>
 
@@ -704,11 +706,11 @@
                     <div className="bg-slate-800 p-3 rounded-lg border border-slate-700 shrink-0">
                       <h3 className="text-xs font-bold text-slate-400 uppercase mb-2">Operation Stats</h3>
                       <div className="space-y-2 text-xs text-slate-300">
-                        <div className="flex justify-between items-center"><span>Lateral Passes:</span><span className="text-white font-mono font-bold">{Math.max(Math.ceil(parseFloat(removePerSideX) / (parseFloat(toolDiameter) * (parseFloat(percentageRemoval) / 100))), Math.ceil(parseFloat(removePerSideY) / (parseFloat(toolDiameter) * (parseFloat(percentageRemoval) / 100))))}</span></div>
+                        <div className="flex justify-between items-center"><span>Lateral Passes:</span><span className="text-white font-mono font-bold">{Math.max(Math.ceil((parseFloat(removeTotalX) / 2) / (parseFloat(toolDiameter) * (parseFloat(percentageRemoval) / 100))), Math.ceil((parseFloat(removeTotalY) / 2) / (parseFloat(toolDiameter) * (parseFloat(percentageRemoval) / 100))))}</span></div>
                         <div className="flex justify-between items-center"><span>Vertical Passes:</span><span className="text-white font-mono font-bold">{fullDepthCut ? 1 : Math.ceil((parseFloat(stockDepth) + parseFloat(zOffset)) / parseFloat(depthPerPass))}</span></div>
-                        <div className="flex justify-between items-center border-t border-slate-700 pt-2"><span>Total Passes:</span><span className="text-blue-400 font-mono font-bold">{Math.max(Math.ceil(parseFloat(removePerSideX) / (parseFloat(toolDiameter) * (parseFloat(percentageRemoval) / 100))), Math.ceil(parseFloat(removePerSideY) / (parseFloat(toolDiameter) * (parseFloat(percentageRemoval) / 100)))) * (fullDepthCut ? 1 : Math.ceil((parseFloat(stockDepth) + parseFloat(zOffset)) / parseFloat(depthPerPass)))}</span></div>
-                        <div className="flex justify-between items-center"><span>Material X:</span><span className="text-white font-mono">{(2 * parseFloat(removePerSideX)).toFixed(2)}mm</span></div>
-                        <div className="flex justify-between items-center"><span>Material Y:</span><span className="text-white font-mono">{(2 * parseFloat(removePerSideY)).toFixed(2)}mm</span></div>
+                        <div className="flex justify-between items-center border-t border-slate-700 pt-2"><span>Total Passes:</span><span className="text-blue-400 font-mono font-bold">{Math.max(Math.ceil((parseFloat(removeTotalX) / 2) / (parseFloat(toolDiameter) * (parseFloat(percentageRemoval) / 100))), Math.ceil((parseFloat(removeTotalY) / 2) / (parseFloat(toolDiameter) * (parseFloat(percentageRemoval) / 100)))) * (fullDepthCut ? 1 : Math.ceil((parseFloat(stockDepth) + parseFloat(zOffset)) / parseFloat(depthPerPass)))}</span></div>
+                        <div className="flex justify-between items-center"><span>Material X:</span><span className="text-white font-mono">{parseFloat(removeTotalX).toFixed(2)}mm</span></div>
+                        <div className="flex justify-between items-center"><span>Material Y:</span><span className="text-white font-mono">{parseFloat(removeTotalY).toFixed(2)}mm</span></div>
                       </div>
                     </div>
                   )}
